@@ -56,6 +56,9 @@ export const auth = betterAuth({
     provider: 'pg',
     schema: authSchema,
   }),
+  account: {
+    storeStateStrategy: 'database',
+  },
   user: {
     modelName: 'tb_users',
     additionalFields: {

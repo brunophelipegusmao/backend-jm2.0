@@ -11,6 +11,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { healthProfiles } from './health';
+import { checkins } from './checkin';
 
 export const userRole = pgEnum('user_role', [
   'MASTER',
@@ -119,6 +120,7 @@ export const session = pgTable(
 export const userRelations = relations(users, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
+  checkins: many(checkins),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({

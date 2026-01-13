@@ -9,6 +9,7 @@ import { DatabaseModule } from './db/database.module';
 import { ProfileCompletionGuard } from './auth/profile-completion.guard';
 import { UsersModule } from './users/users.module';
 import { HealthModule } from './health/health.module';
+import { CheckinModule } from './checkin/checkin.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { HealthModule } from './health/health.module';
       disableGlobalAuthGuard: process.env.NODE_ENV !== 'production',
     }),
     HealthModule,
+    CheckinModule,
   ],
   controllers: [AppController],
   providers: [
