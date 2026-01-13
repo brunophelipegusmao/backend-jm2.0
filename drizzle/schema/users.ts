@@ -12,6 +12,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { healthProfiles } from './health';
 import { checkins } from './checkin';
+import { plans } from './plans';
 
 export const userRole = pgEnum('user_role', [
   'MASTER',
@@ -35,6 +36,9 @@ export const users = pgTable(
     phone: varchar('phone', { length: 15 }),
     active: boolean('active').notNull().default(true),
     role: userRole('role').notNull().default('STUDENT'),
+    planId: uuid('plan_id')
+      .notNull()
+      .references(() => plans.id, { onDelete: 'restrict' }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
@@ -55,6 +59,10 @@ export const usersRelations = relations(users, ({ one }) => ({
   healthProfile: one(healthProfiles, {
     fields: [users.id],
     references: [healthProfiles.userId],
+  }),
+  plan: one(plans, {
+    fields: [users.planId],
+    references: [plans.id],
   }),
 }));
 

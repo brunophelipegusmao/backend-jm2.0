@@ -10,6 +10,7 @@ import { ProfileCompletionGuard } from './auth/profile-completion.guard';
 import { UsersModule } from './users/users.module';
 import { HealthModule } from './health/health.module';
 import { CheckinModule } from './checkin/checkin.module';
+import { PlansModule } from './plans/plans.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { CheckinModule } from './checkin/checkin.module';
     }),
     HealthModule,
     CheckinModule,
+    PlansModule,
   ],
   controllers: [AppController],
   providers: [
