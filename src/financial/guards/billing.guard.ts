@@ -12,6 +12,7 @@ import {
   financialReceivables,
   userSubscriptions,
 } from '../../drizzle/schema/financial';
+import { plans } from '../../drizzle/schema/plans';
 import { users } from '../../drizzle/schema/users';
 
 type SessionUser = { id?: string };
@@ -21,6 +22,7 @@ type AuthSession = { user?: SessionUser };
 type RequestWithSession = Request & { session?: AuthSession };
 
 const DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
+const FREE_PLAN_SLUG = process.env.FREE_PLAN_SLUG || 'free';
 
 type BillingDatabase = DatabaseService['database'];
 
@@ -68,6 +70,17 @@ export const ensureUserBillingStatus = async (
   database: BillingDatabase,
   userId: string,
 ) => {
+  const [userPlan] = await database
+    .select({ planSlug: plans.slug })
+    .from(users)
+    .leftJoin(plans, eq(users.planId, plans.id))
+    .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+    .limit(1);
+
+  if (userPlan?.planSlug === FREE_PLAN_SLUG) {
+    throw new ForbiddenException('Plano free nao permite check-in');
+  }
+
   const [activeSubscription] = await database
     .select({ id: userSubscriptions.id })
     .from(userSubscriptions)

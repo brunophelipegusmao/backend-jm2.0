@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
+import { CloudinaryService } from '../common/services/cloudinary.service';
 import { DatabaseService } from '../db/database.service';
 import { healthProfiles } from '../drizzle/schema/health';
 import { plans } from '../drizzle/schema/plans';
@@ -8,12 +9,33 @@ import { account, users } from '../drizzle/schema/users';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 
+type AuditContext = {
+  actorUserId: string;
+  ip?: string;
+  userAgent?: string;
+};
+
 @Injectable()
 export class UsersService {
   constructor(
     private readonly databaseService: DatabaseService,
     private readonly auditService: AuditService,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
+
+  private buildAuditMetadata(context?: AuditContext) {
+    if (!context) {
+      return null;
+    }
+    const metadata: Record<string, string> = {};
+    if (context.ip) {
+      metadata.ip = context.ip;
+    }
+    if (context.userAgent) {
+      metadata.userAgent = context.userAgent;
+    }
+    return Object.keys(metadata).length > 0 ? metadata : null;
+  }
 
   getMe(session: { user?: { id?: string } }) {
     if (!session?.user?.id) {
@@ -28,6 +50,8 @@ export class UsersService {
         cpf: users.cpf,
         name: users.name,
         image: users.image,
+        avatarPublicId: users.avatarPublicId,
+        avatarUrl: users.avatarUrl,
         address: users.address,
         phone: users.phone,
         active: users.active,
@@ -51,6 +75,8 @@ export class UsersService {
         cpf: users.cpf,
         name: users.name,
         image: users.image,
+        avatarPublicId: users.avatarPublicId,
+        avatarUrl: users.avatarUrl,
         address: users.address,
         phone: users.phone,
         active: users.active,
@@ -120,6 +146,8 @@ export class UsersService {
         cpf: users.cpf,
         name: users.name,
         image: users.image,
+        avatarPublicId: users.avatarPublicId,
+        avatarUrl: users.avatarUrl,
         address: users.address,
         phone: users.phone,
         active: users.active,
@@ -228,6 +256,8 @@ export class UsersService {
         cpf: users.cpf,
         name: users.name,
         image: users.image,
+        avatarPublicId: users.avatarPublicId,
+        avatarUrl: users.avatarUrl,
         address: users.address,
         phone: users.phone,
         active: users.active,
@@ -307,5 +337,69 @@ export class UsersService {
       .where(and(eq(users.id, session.user.id), isNull(users.deletedAt)))
       .returning();
     return user ?? null;
+  }
+
+  async updateAvatar(
+    userId: string,
+    file: { buffer: Buffer },
+    audit?: AuditContext,
+  ) {
+    const [current] = await this.databaseService.database
+      .select({
+        id: users.id,
+        avatarPublicId: users.avatarPublicId,
+        avatarUrl: users.avatarUrl,
+        image: users.image,
+      })
+      .from(users)
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .limit(1);
+
+    if (!current) {
+      throw new BadRequestException('Usuario nao encontrado');
+    }
+
+    const uploaded = await this.cloudinaryService.uploadImage(file.buffer, {
+      folder: 'avatars',
+    });
+
+    const [updated] = await this.databaseService.database
+      .update(users)
+      .set({
+        avatarPublicId: uploaded.publicId,
+        avatarUrl: uploaded.secureUrl,
+        image: uploaded.secureUrl,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .returning({
+        id: users.id,
+        avatarPublicId: users.avatarPublicId,
+        avatarUrl: users.avatarUrl,
+        image: users.image,
+      });
+
+    const result = updated ?? null;
+
+    await this.auditService.log({
+      actorUserId: audit?.actorUserId,
+      targetUserId: userId,
+      entity: 'users',
+      entityId: userId,
+      action: 'avatar_updated',
+      before: current,
+      after: result ?? current,
+      metadata: this.buildAuditMetadata(audit),
+    });
+
+    if (current.avatarPublicId) {
+      try {
+        await this.cloudinaryService.deleteImage(current.avatarPublicId);
+      } catch {
+        // Ignore cleanup failures to avoid breaking avatar update.
+      }
+    }
+
+    return result;
   }
 }

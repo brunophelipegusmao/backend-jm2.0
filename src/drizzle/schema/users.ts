@@ -31,6 +31,8 @@ export const users = pgTable(
     cpf: varchar('cpf', { length: 11 }),
     name: text('name'),
     image: text('image'),
+    avatarPublicId: varchar('avatar_public_id', { length: 140 }),
+    avatarUrl: varchar('avatar_url', { length: 500 }),
     password: varchar('password', { length: 255 }),
     address: text('address'),
     phone: varchar('phone', { length: 15 }),

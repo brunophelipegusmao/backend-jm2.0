@@ -4,13 +4,23 @@ import {
   Controller,
   Get,
   Patch,
+  Post,
+  Req,
+  UploadedFile,
+  UseInterceptors,
   UseGuards,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   AuthGuard,
   Session,
   UserSession,
 } from '@thallesp/nestjs-better-auth';
+import type { Request } from 'express';
+import {
+  assertValidImageUpload,
+  MAX_IMAGE_SIZE_BYTES,
+} from '../common/utils/image-upload';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { UsersService } from './users.service';
 import {
@@ -53,5 +63,24 @@ export class UsersController {
       { user: { id: this.requireUserId(session) } },
       completeProfileDto,
     );
+  }
+
+  @Post('me/avatar')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: MAX_IMAGE_SIZE_BYTES } }),
+  )
+  uploadAvatar(
+    @Session() session: UserSession,
+    @Req() request: Request,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const userId = this.requireUserId(session);
+    const validatedFile = assertValidImageUpload(file);
+    const userAgentHeader = request.headers['user-agent'];
+    return this.usersService.updateAvatar(userId, validatedFile, {
+      actorUserId: userId,
+      ip: request.ip,
+      userAgent: typeof userAgentHeader === 'string' ? userAgentHeader : undefined,
+    });
   }
 }

@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditService } from '../audit/audit.service';
+import { CloudinaryService } from '../common/services/cloudinary.service';
 import { DatabaseService } from '../db/database.service';
 import { UsersAdminController } from './users-admin.controller';
 import { UsersService } from './users.service';
@@ -19,6 +20,10 @@ describe('UsersAdminController', () => {
         {
           provide: AuditService,
           useValue: { log: jest.fn() },
+        },
+        {
+          provide: CloudinaryService,
+          useValue: { uploadImage: jest.fn(), deleteImage: jest.fn() },
         },
       ],
     }).compile();

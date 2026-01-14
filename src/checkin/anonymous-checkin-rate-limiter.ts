@@ -1,4 +1,4 @@
-import { Injectable, TooManyRequestsException } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 
 type RateLimitEntry = { count: number; resetAt: number };
 
@@ -51,8 +51,9 @@ export class AnonymousCheckinRateLimiter {
     }
     entry.count += 1;
     if (entry.count > limit) {
-      throw new TooManyRequestsException(
+      throw new HttpException(
         'Muitas tentativas, tente novamente mais tarde',
+        HttpStatus.TOO_MANY_REQUESTS,
       );
     }
   }

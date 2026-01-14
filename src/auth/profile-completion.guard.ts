@@ -41,6 +41,10 @@ export class ProfileCompletionGuard implements CanActivate {
       return true;
     }
 
+    if (path?.startsWith('/events/public') || path === '/events/calendar') {
+      return true;
+    }
+
     const session = request.session;
     const userId = session?.user?.id;
     if (!userId) {

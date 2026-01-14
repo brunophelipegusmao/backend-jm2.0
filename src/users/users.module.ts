@@ -5,9 +5,10 @@ import { DatabaseModule } from '../db/database.module';
 import { AuditModule } from '../audit/audit.module';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { UsersAdminController } from './users-admin.controller';
+import { CloudinaryModule } from '../common/services/cloudinary.module';
 
 @Module({
-  imports: [DatabaseModule, AuditModule],
+  imports: [DatabaseModule, AuditModule, CloudinaryModule],
   controllers: [UsersController, UsersAdminController],
   providers: [UsersService, RolesGuard],
 })

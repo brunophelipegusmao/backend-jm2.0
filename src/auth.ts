@@ -9,6 +9,7 @@ import {
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { and, eq, isNull } from 'drizzle-orm';
 import * as schema from './drizzle/schema';
+import { plans } from './drizzle/schema/plans';
 import { users } from './drizzle/schema/users';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -34,6 +35,36 @@ if (!googleClientSecret) {
 
 const sql = neon(databaseUrl);
 const db = drizzle(sql, { schema });
+
+const defaultPlanSlug = process.env.DEFAULT_PLAN_SLUG || 'free';
+let cachedDefaultPlanId: string | null = null;
+
+const getDefaultPlanId = async () => {
+  if (cachedDefaultPlanId) {
+    return cachedDefaultPlanId;
+  }
+
+  const [plan] = await db
+    .select({ id: plans.id })
+    .from(plans)
+    .where(
+      and(
+        eq(plans.slug, defaultPlanSlug),
+        eq(plans.active, true),
+        isNull(plans.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!plan) {
+    throw new APIError('BAD_REQUEST', {
+      message: 'Plano padrao nao configurado',
+    });
+  }
+
+  cachedDefaultPlanId = plan.id;
+  return plan.id;
+};
 
 const authSchema = {
   users: schema.users,
@@ -161,6 +192,18 @@ export const auth = betterAuth({
     enabled: true,
   },
   databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          const planId = (user as { planId?: string | null }).planId;
+          if (planId) {
+            return;
+          }
+          const resolvedPlanId = await getDefaultPlanId();
+          return { data: { planId: resolvedPlanId } };
+        },
+      },
+    },
     session: {
       create: {
         before: async (session) => {
