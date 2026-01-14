@@ -5,8 +5,8 @@ import {
 } from '@nestjs/common';
 import { and, desc, eq, gt, isNull, lte, or } from 'drizzle-orm';
 import { DatabaseService } from '../db/database.service';
-import { checkinBlocks, checkins } from '../../drizzle/schema/checkin';
-import { users } from '../../drizzle/schema/users';
+import { checkinBlocks, checkins } from '../drizzle/schema/checkin';
+import { users } from '../drizzle/schema/users';
 import { CreateCheckinDto } from './dto/create-checkin.dto';
 import { UpdateCheckinDto } from './dto/update-checkin.dto';
 
@@ -31,7 +31,7 @@ export class CheckinService {
     const [user] = await this.databaseService.database
       .select({ role: users.role, active: users.active })
       .from(users)
-      .where(eq(users.id, userId))
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
 
     if (!user) {
@@ -54,6 +54,7 @@ export class CheckinService {
       .where(
         and(
           eq(checkinBlocks.active, true),
+          isNull(checkinBlocks.deletedAt),
           lte(checkinBlocks.startsAt, checkedInAt),
           gt(checkinBlocks.endsAt, checkedInAt),
           or(

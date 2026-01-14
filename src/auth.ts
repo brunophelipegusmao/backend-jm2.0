@@ -3,7 +3,7 @@ import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import * as schema from '../drizzle/schema';
+import * as schema from './drizzle/schema';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {

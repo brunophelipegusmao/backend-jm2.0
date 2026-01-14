@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { bloodTypeEnum, sexEnum } from '../../../drizzle/schema/health';
+import { bloodTypeEnum, sexEnum } from '../../drizzle/schema/health';
 
 const dateString = z
   .string()

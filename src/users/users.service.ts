@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { DatabaseService } from '../db/database.service';
-import { healthProfiles } from '../../drizzle/schema/health';
-import { users } from '../../drizzle/schema/users';
+import { healthProfiles } from '../drizzle/schema/health';
+import { users } from '../drizzle/schema/users';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 
 @Injectable()
@@ -17,7 +17,7 @@ export class UsersService {
     return this.databaseService.database
       .select()
       .from(users)
-      .where(eq(users.id, session.user.id))
+      .where(and(eq(users.id, session.user.id), isNull(users.deletedAt)))
       .limit(1)
       .then((rows) => rows[0] ?? null);
   }
@@ -31,13 +31,18 @@ export class UsersService {
     const [user] = await this.databaseService.database
       .select({ cpf: users.cpf })
       .from(users)
-      .where(eq(users.id, userId))
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
 
     const [health] = await this.databaseService.database
       .select({ id: healthProfiles.id })
       .from(healthProfiles)
-      .where(eq(healthProfiles.userId, userId))
+      .where(
+        and(
+          eq(healthProfiles.userId, userId),
+          isNull(healthProfiles.deletedAt),
+        ),
+      )
       .limit(1);
 
     return {
@@ -61,7 +66,7 @@ export class UsersService {
     const [existingCpf] = await this.databaseService.database
       .select({ id: users.id })
       .from(users)
-      .where(eq(users.cpf, completeProfileDto.cpf))
+      .where(and(eq(users.cpf, completeProfileDto.cpf), isNull(users.deletedAt)))
       .limit(1);
 
     if (existingCpf && existingCpf.id !== session.user.id) {
@@ -79,7 +84,7 @@ export class UsersService {
     const [user] = await this.databaseService.database
       .update(users)
       .set(payload)
-      .where(eq(users.id, session.user.id))
+      .where(and(eq(users.id, session.user.id), isNull(users.deletedAt)))
       .returning();
     return user ?? null;
   }

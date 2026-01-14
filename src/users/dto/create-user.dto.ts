@@ -6,7 +6,7 @@ import {
   IsString,
   Matches,
 } from 'class-validator';
-import { userRole } from '../../../drizzle/schema/users';
+import { userRole } from '../../drizzle/schema/users';
 
 export class CreateUserDto {
   @IsOptional()

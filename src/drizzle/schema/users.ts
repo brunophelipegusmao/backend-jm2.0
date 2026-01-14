@@ -26,15 +26,16 @@ export const users = pgTable(
   'tb_users',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    email: text('email').notNull().unique(),
+    email: text('email').notNull(),
     emailVerified: boolean('email_verified').default(false).notNull(),
-    cpf: varchar('cpf', { length: 11 }).unique(),
+    cpf: varchar('cpf', { length: 11 }),
     name: text('name'),
     image: text('image'),
     password: varchar('password', { length: 255 }),
     address: text('address'),
     phone: varchar('phone', { length: 15 }),
     active: boolean('active').notNull().default(true),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     role: userRole('role').notNull().default('STUDENT'),
     planId: uuid('plan_id')
       .notNull()
@@ -51,7 +52,15 @@ export const users = pgTable(
       // Min 6 chars, at least one lower, one upper, one digit, one non-word char.
       sql`${table.password} ~ '^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*\\W).{6,}$'`,
     ),
-    phoneUnique: uniqueIndex('tb_users_phone_unique').on(table.phone),
+    emailUnique: uniqueIndex('tb_users_email_unique')
+      .on(table.email)
+      .where(sql`${table.deletedAt} IS NULL`),
+    cpfUnique: uniqueIndex('tb_users_cpf_unique')
+      .on(table.cpf)
+      .where(sql`${table.deletedAt} IS NULL`),
+    phoneUnique: uniqueIndex('tb_users_phone_unique')
+      .on(table.phone)
+      .where(sql`${table.deletedAt} IS NULL`),
   }),
 );
 

@@ -5,10 +5,10 @@ import {
   Injectable,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { DatabaseService } from '../db/database.service';
-import { healthProfiles } from '../../drizzle/schema/health';
-import { users } from '../../drizzle/schema/users';
+import { healthProfiles } from '../drizzle/schema/health';
+import { users } from '../drizzle/schema/users';
 
 type SessionUser = { id?: string };
 type AuthSession = { user?: SessionUser };
@@ -50,13 +50,22 @@ export class ProfileCompletionGuard implements CanActivate {
     const [user] = await this.databaseService.database
       .select({ cpf: users.cpf })
       .from(users)
-      .where(eq(users.id, userId))
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
+
+    if (!user) {
+      throw new ForbiddenException('Usuario inativo');
+    }
 
     const [health] = await this.databaseService.database
       .select({ id: healthProfiles.id })
       .from(healthProfiles)
-      .where(eq(healthProfiles.userId, userId))
+      .where(
+        and(
+          eq(healthProfiles.userId, userId),
+          isNull(healthProfiles.deletedAt),
+        ),
+      )
       .limit(1);
 
     const missingCpf = !user?.cpf;

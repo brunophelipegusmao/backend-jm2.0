@@ -18,6 +18,13 @@ export const checkins = pgTable('tb_checkins', {
   checkedInAt: timestamp('checked_in_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => /* @__PURE__ */ new Date()),
 });
 
 export const checkinBlocks = pgTable(
@@ -37,6 +44,7 @@ export const checkinBlocks = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     endsAfterStarts: check(

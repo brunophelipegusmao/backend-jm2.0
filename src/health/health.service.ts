@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { DatabaseService } from '../db/database.service';
-import { healthProfiles } from '../../drizzle/schema/health';
+import { healthProfiles } from '../drizzle/schema/health';
 import { CreateHealthDto } from './dto/create-health.dto';
 import { ComputeBodyCompositionDto } from './dto/compute-body-composition.dto';
 import { UpdateHealthDto } from './dto/update-health.dto';
@@ -207,7 +207,12 @@ export class HealthService {
     const [profile] = await this.databaseService.database
       .select()
       .from(healthProfiles)
-      .where(eq(healthProfiles.userId, userId))
+      .where(
+        and(
+          eq(healthProfiles.userId, userId),
+          isNull(healthProfiles.deletedAt),
+        ),
+      )
       .limit(1);
     return this.attachBmiCategory(profile ?? null);
   }
@@ -231,6 +236,7 @@ export class HealthService {
       })
       .onConflictDoUpdate({
         target: healthProfiles.userId,
+        targetWhere: sql`${healthProfiles.deletedAt} IS NULL`,
         set: {
           ...values,
           ...derived,
@@ -245,7 +251,12 @@ export class HealthService {
     const [current] = await this.databaseService.database
       .select()
       .from(healthProfiles)
-      .where(eq(healthProfiles.userId, userId))
+      .where(
+        and(
+          eq(healthProfiles.userId, userId),
+          isNull(healthProfiles.deletedAt),
+        ),
+      )
       .limit(1);
 
     if (!current) {
@@ -263,7 +274,12 @@ export class HealthService {
         ...derived,
         updatedAt: new Date(),
       })
-      .where(eq(healthProfiles.userId, userId))
+      .where(
+        and(
+          eq(healthProfiles.userId, userId),
+          isNull(healthProfiles.deletedAt),
+        ),
+      )
       .returning();
 
     return this.attachBmiCategory(profile ?? null);
@@ -271,8 +287,14 @@ export class HealthService {
 
   async removeForUser(userId: string) {
     const [profile] = await this.databaseService.database
-      .delete(healthProfiles)
-      .where(eq(healthProfiles.userId, userId))
+      .update(healthProfiles)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(healthProfiles.userId, userId),
+          isNull(healthProfiles.deletedAt),
+        ),
+      )
       .returning();
     return this.attachBmiCategory(profile ?? null);
   }

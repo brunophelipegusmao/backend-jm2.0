@@ -43,6 +43,13 @@
       "when": 1768329682805,
       "tag": "0005_bored_tiger_shark",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1768333979008,
+      "tag": "0006_glossy_stellaris",
+      "breakpoints": true
     }
   ]
 }

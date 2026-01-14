@@ -77,11 +77,12 @@ export const healthProfiles = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
-    userHealthUnique: uniqueIndex('tb_health_profiles_user_unique').on(
-      table.userId,
-    ),
+    userHealthUnique: uniqueIndex('tb_health_profiles_user_unique')
+      .on(table.userId)
+      .where(sql`${table.deletedAt} IS NULL`),
     birthValid: check(
       'tb_health_profiles_birth_valid',
       sql`${table.birthDate} <= CURRENT_DATE AND ${table.birthDate} >= DATE '1900-01-01'`,

@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
   pgTable,
   uuid,
@@ -25,6 +25,7 @@ export const plans = pgTable(
     promoEndsAt: timestamp('promo_ends_at', { withTimezone: true }),
     popular: boolean('popular').notNull().default(false),
     active: boolean('active').notNull().default(true),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -34,10 +35,18 @@ export const plans = pgTable(
       .$onUpdate(() => /* @__PURE__ */ new Date()),
   },
   (t) => ({
-    nameUnique: uniqueIndex('tb_plans_name_unique').on(t.name),
-    slugUnique: uniqueIndex('tb_plans_slug_unique').on(t.slug),
-    activeIdx: index('tb_plans_active_idx').on(t.active),
-    popularIdx: index('tb_plans_popular_idx').on(t.popular),
+    nameUnique: uniqueIndex('tb_plans_name_unique')
+      .on(t.name)
+      .where(sql`${t.deletedAt} IS NULL`),
+    slugUnique: uniqueIndex('tb_plans_slug_unique')
+      .on(t.slug)
+      .where(sql`${t.deletedAt} IS NULL`),
+    activeIdx: index('tb_plans_active_idx')
+      .on(t.active)
+      .where(sql`${t.deletedAt} IS NULL`),
+    popularIdx: index('tb_plans_popular_idx')
+      .on(t.popular)
+      .where(sql`${t.deletedAt} IS NULL`),
   }),
 );
 

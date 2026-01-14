@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { and, desc, eq, ne, or } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, or } from 'drizzle-orm';
 import { DatabaseService } from '../db/database.service';
-import { plans } from '../../drizzle/schema/plans';
+import { plans } from '../drizzle/schema/plans';
+import { users } from '../drizzle/schema/users';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
 
@@ -53,7 +54,10 @@ export class PlansService {
     }
 
     const where = filters.length === 1 ? filters[0] : or(...filters);
-    const whereWithIgnore = ignoreId ? and(where, ne(plans.id, ignoreId)) : where;
+    const baseWhere = and(where, isNull(plans.deletedAt));
+    const whereWithIgnore = ignoreId
+      ? and(baseWhere, ne(plans.id, ignoreId))
+      : baseWhere;
 
     const [existing] = await this.databaseService.database
       .select({ id: plans.id, name: plans.name, slug: plans.slug })
@@ -67,11 +71,12 @@ export class PlansService {
   }
 
   private resolvePromo(
-    payload: Pick<
-      CreatePlanDto,
-      'promoActive' | 'promoPriceCents' | 'promoEndsAt' | 'priceCents'
-    > &
-      Partial<UpdatePlanDto>,
+    payload: {
+      promoActive?: boolean;
+      promoPriceCents?: number | null;
+      promoEndsAt?: string | Date | null;
+      priceCents?: number;
+    },
     current?: PlanRow | null,
   ) {
     const promoPriceCents =
@@ -151,17 +156,17 @@ export class PlansService {
       .orderBy(desc(plans.popular), plans.name);
 
     if (!includeInactive) {
-      return query.where(eq(plans.active, true));
+      return query.where(and(eq(plans.active, true), isNull(plans.deletedAt)));
     }
 
-    return query;
+    return query.where(isNull(plans.deletedAt));
   }
 
   async findOne(id: string) {
     const [plan] = await this.databaseService.database
       .select()
       .from(plans)
-      .where(eq(plans.id, id))
+      .where(and(eq(plans.id, id), isNull(plans.deletedAt)))
       .limit(1);
 
     return plan ?? null;
@@ -171,7 +176,7 @@ export class PlansService {
     const [current] = await this.databaseService.database
       .select()
       .from(plans)
-      .where(eq(plans.id, id))
+      .where(and(eq(plans.id, id), isNull(plans.deletedAt)))
       .limit(1);
 
     if (!current) {
@@ -231,17 +236,33 @@ export class PlansService {
     const [plan] = await this.databaseService.database
       .update(plans)
       .set(updates)
-      .where(eq(plans.id, id))
+      .where(and(eq(plans.id, id), isNull(plans.deletedAt)))
       .returning();
 
     return plan ?? null;
   }
 
   async remove(id: string) {
+    const [activeUser] = await this.databaseService.database
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        and(
+          eq(users.planId, id),
+          eq(users.active, true),
+          isNull(users.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (activeUser) {
+      throw new BadRequestException('Plano possui usuarios ativos');
+    }
+
     const [plan] = await this.databaseService.database
       .update(plans)
-      .set({ active: false })
-      .where(eq(plans.id, id))
+      .set({ active: false, deletedAt: new Date() })
+      .where(and(eq(plans.id, id), isNull(plans.deletedAt)))
       .returning();
 
     return plan ?? null;
