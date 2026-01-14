@@ -11,6 +11,7 @@ import {
   Session,
   UserSession,
 } from '@thallesp/nestjs-better-auth';
+import { BillingGuard } from '../financial/guards/billing.guard';
 import { CheckinService } from './checkin.service';
 import { CreateCheckinDto } from './dto/create-checkin.dto';
 
@@ -28,6 +29,7 @@ export class CheckinController {
   }
 
   @Post('me')
+  @UseGuards(BillingGuard)
   createForMe(
     @Session() session: UserSession,
     @Body() createCheckinDto: CreateCheckinDto,

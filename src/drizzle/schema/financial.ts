@@ -11,6 +11,7 @@ import {
   boolean,
   index,
   uniqueIndex,
+  jsonb,
 } from 'drizzle-orm/pg-core';
 
 import { users } from './users';
@@ -37,12 +38,36 @@ export const receivableStatus = pgEnum('receivable_status', [
   'renegotiated',
 ]);
 
+export const receivableKind = pgEnum('receivable_kind', [
+  'regular',
+  'prorated',
+  'adjustment',
+]);
+
 export const paymentMethod = pgEnum('payment_method', [
   'pix',
   'card',
   'cash',
   'transfer',
   'other',
+]);
+
+export const paymentSource = pgEnum('payment_source', ['manual', 'gateway']);
+
+export const subscriptionDueDateMode = pgEnum('subscription_due_date_mode', [
+  'fixed_day',
+  'custom_date',
+]);
+
+export const subscriptionProrationMode = pgEnum('subscription_proration_mode', [
+  'first_month_prorated',
+  'none',
+  'full_first_month',
+]);
+
+export const subscriptionProrationBase = pgEnum('subscription_proration_base', [
+  'calendar_month',
+  '30_days',
 ]);
 
 export const userSubscriptions = pgTable(
@@ -60,11 +85,27 @@ export const userSubscriptions = pgTable(
 
     status: subscriptionStatus('status').notNull().default('active'),
 
-    billingDay: integer('billing_day').notNull(), // 1..28/31
+    dueDateMode: subscriptionDueDateMode('due_date_mode')
+      .notNull()
+      .default('fixed_day'),
+    billingDay: integer('billing_day'), // 1..28/31
+    customDueDay: integer('custom_due_day'),
+    customDueDate: date('custom_due_date'),
+
     startsAt: timestamp('starts_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
     endsAt: timestamp('ends_at', { withTimezone: true }),
+
+    monthlyAmountCentsSnapshot: integer(
+      'monthly_amount_cents_snapshot',
+    ).notNull(),
+    prorationMode: subscriptionProrationMode('proration_mode')
+      .notNull()
+      .default('first_month_prorated'),
+    prorationBase: subscriptionProrationBase('proration_base')
+      .notNull()
+      .default('calendar_month'),
 
     // Snapshot do plano (histórico não depende do catálogo)
     planNameSnapshot: varchar('plan_name_snapshot', { length: 80 }).notNull(),
@@ -119,7 +160,11 @@ export const financialReceivables = pgTable(
     amountCents: integer('amount_cents').notNull(),
 
     status: receivableStatus('status').notNull().default('open'),
+    kind: receivableKind('kind').notNull().default('regular'),
     paidAt: timestamp('paid_at', { withTimezone: true }),
+
+    periodStart: date('period_start'),
+    periodEnd: date('period_end'),
 
     notes: text('notes'),
 
@@ -149,10 +194,14 @@ export const financialReceivables = pgTable(
       .on(t.competence)
       .where(sql`${t.deletedAt} IS NULL`),
 
+    subscriptionIdx: index('tb_financial_receivables_subscription_idx')
+      .on(t.subscriptionId)
+      .where(sql`${t.deletedAt} IS NULL`),
+
     // Evita duplicar mensalidade para mesma assinatura na mesma competência
     uniquePerCompetence: uniqueIndex('tb_financial_receivables_unique_sub_comp')
       .on(t.subscriptionId, t.competence)
-      .where(sql`${t.deletedAt} IS NULL`),
+      .where(sql`${t.deletedAt} IS NULL AND ${t.kind} = 'regular'`),
   }),
 );
 
@@ -172,8 +221,10 @@ export const financialPayments = pgTable(
     amountCents: integer('amount_cents').notNull(),
     method: paymentMethod('method').notNull(),
     paidAt: timestamp('paid_at', { withTimezone: true }).notNull().defaultNow(),
+    source: paymentSource('source').notNull().default('manual'),
 
     externalRef: varchar('external_ref', { length: 140 }),
+    metadata: jsonb('metadata').$type<Record<string, unknown> | null>(),
     notes: text('notes'),
 
     // Estorno/anulação sem apagar
@@ -183,6 +234,10 @@ export const financialPayments = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date()),
 
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
@@ -198,6 +253,10 @@ export const financialPayments = pgTable(
     paidAtIdx: index('tb_financial_payments_paid_at_idx')
       .on(t.paidAt)
       .where(sql`${t.deletedAt} IS NULL`),
+
+    externalRefUnique: uniqueIndex('tb_financial_payments_external_ref_unique')
+      .on(t.externalRef)
+      .where(sql`${t.deletedAt} IS NULL AND ${t.externalRef} IS NOT NULL`),
   }),
 );
 

@@ -4,7 +4,6 @@ import { drizzle } from 'drizzle-orm/neon-http';
 import {
   APIError,
   betterAuth,
-  createAuthMiddleware,
   type BetterAuthPlugin,
 } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
@@ -83,7 +82,7 @@ const authPolicyPlugin = {
         matcher(context) {
           return context.path === '/sign-in/email';
         },
-        handler: createAuthMiddleware(async (ctx) => {
+        handler: async (ctx: any) => {
           const email = ctx.body?.email?.toString().trim().toLowerCase();
           if (!email) {
             return;
@@ -102,17 +101,17 @@ const authPolicyPlugin = {
               message: 'Usuario inativo',
             });
           }
-        }),
+        },
       },
       {
         matcher(context) {
           return context.path === '/sign-in/social';
         },
-        handler: createAuthMiddleware(async (ctx) => {
+        handler: async (ctx: any) => {
           if (!profileCompletionUrl && !panelUrl) {
             return;
           }
-          const body = ctx.body ?? {};
+          const body = (ctx.body ?? {}) as Record<string, any>;
           const updatedBody = {
             ...body,
             ...(panelUrl && !body.callbackURL ? { callbackURL: panelUrl } : {}),
@@ -125,7 +124,7 @@ const authPolicyPlugin = {
               body: updatedBody,
             },
           };
-        }),
+        },
       },
     ],
   },
