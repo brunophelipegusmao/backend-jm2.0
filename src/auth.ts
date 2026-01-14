@@ -1,9 +1,16 @@
 import 'dotenv/config';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
-import { betterAuth } from 'better-auth';
+import {
+  APIError,
+  betterAuth,
+  createAuthMiddleware,
+  type BetterAuthPlugin,
+} from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { and, eq, isNull } from 'drizzle-orm';
 import * as schema from './drizzle/schema';
+import { users } from './drizzle/schema/users';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -48,6 +55,82 @@ const socialProviders = {
   },
 };
 
+const normalizeUrl = (base: string, path: string) => {
+  const trimmedBase = base.replace(/\/+$/, '');
+  const trimmedPath = path.replace(/^\/+/, '');
+  return `${trimmedBase}/${trimmedPath}`;
+};
+
+const panelUrl =
+  process.env.FRONTEND_PANEL_URL ||
+  (frontendUrl
+    ? normalizeUrl(frontendUrl, process.env.FRONTEND_PANEL_PATH ?? 'panel')
+    : undefined);
+const profileCompletionUrl =
+  process.env.FRONTEND_PROFILE_COMPLETION_URL ||
+  (frontendUrl
+    ? normalizeUrl(
+        frontendUrl,
+        process.env.FRONTEND_PROFILE_COMPLETION_PATH ?? 'complete-profile',
+      )
+    : undefined);
+
+const authPolicyPlugin = {
+  id: 'auth-policy',
+  hooks: {
+    before: [
+      {
+        matcher(context) {
+          return context.path === '/sign-in/email';
+        },
+        handler: createAuthMiddleware(async (ctx) => {
+          const email = ctx.body?.email?.toString().trim().toLowerCase();
+          if (!email) {
+            return;
+          }
+          const [user] = await db
+            .select({
+              id: users.id,
+              active: users.active,
+              deletedAt: users.deletedAt,
+            })
+            .from(users)
+            .where(and(eq(users.email, email), isNull(users.deletedAt)))
+            .limit(1);
+          if (user && (user.deletedAt || !user.active)) {
+            throw new APIError('UNAUTHORIZED', {
+              message: 'Usuario inativo',
+            });
+          }
+        }),
+      },
+      {
+        matcher(context) {
+          return context.path === '/sign-in/social';
+        },
+        handler: createAuthMiddleware(async (ctx) => {
+          if (!profileCompletionUrl && !panelUrl) {
+            return;
+          }
+          const body = ctx.body ?? {};
+          const updatedBody = {
+            ...body,
+            ...(panelUrl && !body.callbackURL ? { callbackURL: panelUrl } : {}),
+            ...(profileCompletionUrl && !body.newUserCallbackURL
+              ? { newUserCallbackURL: profileCompletionUrl }
+              : {}),
+          };
+          return {
+            context: {
+              body: updatedBody,
+            },
+          };
+        }),
+      },
+    ],
+  },
+} satisfies BetterAuthPlugin;
+
 export const auth = betterAuth({
   secret: betterAuthSecret,
   baseURL: betterAuthUrl,
@@ -58,6 +141,12 @@ export const auth = betterAuth({
   }),
   account: {
     storeStateStrategy: 'database',
+    accountLinking: {
+      enabled: true,
+      trustedProviders: ['google'],
+      allowDifferentEmails: false,
+      updateUserInfoOnLink: true,
+    },
   },
   user: {
     modelName: 'tb_users',
@@ -72,10 +161,30 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
+  databaseHooks: {
+    session: {
+      create: {
+        before: async (session) => {
+          const [user] = await db
+            .select({ active: users.active, deletedAt: users.deletedAt })
+            .from(users)
+            .where(and(eq(users.id, session.userId), isNull(users.deletedAt)))
+            .limit(1);
+
+          if (!user || !user.active) {
+            return false;
+          }
+
+          return;
+        },
+      },
+    },
+  },
   advanced: {
     database: {
       generateId: 'uuid',
     },
   },
   socialProviders,
+  plugins: [authPolicyPlugin],
 });

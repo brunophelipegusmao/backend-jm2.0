@@ -1,13 +1,19 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../db/database.service';
 import { healthProfiles } from '../drizzle/schema/health';
-import { users } from '../drizzle/schema/users';
+import { plans } from '../drizzle/schema/plans';
+import { account, users } from '../drizzle/schema/users';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
+import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly auditService: AuditService,
+  ) {}
 
   getMe(session: { user?: { id?: string } }) {
     if (!session?.user?.id) {
@@ -15,9 +21,46 @@ export class UsersService {
     }
 
     return this.databaseService.database
-      .select()
+      .select({
+        id: users.id,
+        email: users.email,
+        emailVerified: users.emailVerified,
+        cpf: users.cpf,
+        name: users.name,
+        image: users.image,
+        address: users.address,
+        phone: users.phone,
+        active: users.active,
+        role: users.role,
+        planId: users.planId,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
+      })
       .from(users)
       .where(and(eq(users.id, session.user.id), isNull(users.deletedAt)))
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+  }
+
+  getByIdForAdmin(userId: string) {
+    return this.databaseService.database
+      .select({
+        id: users.id,
+        email: users.email,
+        emailVerified: users.emailVerified,
+        cpf: users.cpf,
+        name: users.name,
+        image: users.image,
+        address: users.address,
+        phone: users.phone,
+        active: users.active,
+        role: users.role,
+        planId: users.planId,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
+      })
+      .from(users)
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1)
       .then((rows) => rows[0] ?? null);
   }
@@ -34,6 +77,18 @@ export class UsersService {
       .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
 
+    const [passwordAccount] = await this.databaseService.database
+      .select({ id: account.id })
+      .from(account)
+      .where(
+        and(
+          eq(account.userId, userId),
+          eq(account.providerId, 'credential'),
+          isNotNull(account.password),
+        ),
+      )
+      .limit(1);
+
     const [health] = await this.databaseService.database
       .select({ id: healthProfiles.id })
       .from(healthProfiles)
@@ -48,7 +103,157 @@ export class UsersService {
     return {
       cpfFilled: !!user?.cpf,
       healthFilled: !!health,
+      hasPassword: !!passwordAccount,
     };
+  }
+
+  async updateByIdForAdmin(
+    userId: string,
+    payload: UpdateUserAdminDto,
+    actor: { actorUserId: string; ip?: string; userAgent?: string },
+  ) {
+    const [current] = await this.databaseService.database
+      .select({
+        id: users.id,
+        email: users.email,
+        emailVerified: users.emailVerified,
+        cpf: users.cpf,
+        name: users.name,
+        image: users.image,
+        address: users.address,
+        phone: users.phone,
+        active: users.active,
+        role: users.role,
+        planId: users.planId,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
+      })
+      .from(users)
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .limit(1);
+
+    if (!current) {
+      throw new BadRequestException('Usuario nao encontrado');
+    }
+
+    if (payload.email) {
+      const [existingEmail] = await this.databaseService.database
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.email, payload.email), isNull(users.deletedAt)))
+        .limit(1);
+
+      if (existingEmail && existingEmail.id !== userId) {
+        throw new BadRequestException('Email ja cadastrado');
+      }
+    }
+
+    if (payload.cpf) {
+      const [existingCpf] = await this.databaseService.database
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.cpf, payload.cpf), isNull(users.deletedAt)))
+        .limit(1);
+
+      if (existingCpf && existingCpf.id !== userId) {
+        throw new BadRequestException('CPF ja cadastrado');
+      }
+    }
+
+    if (payload.phone) {
+      const [existingPhone] = await this.databaseService.database
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.phone, payload.phone), isNull(users.deletedAt)))
+        .limit(1);
+
+      if (existingPhone && existingPhone.id !== userId) {
+        throw new BadRequestException('Telefone ja cadastrado');
+      }
+    }
+
+    if (payload.planId) {
+      const [plan] = await this.databaseService.database
+        .select({ id: plans.id })
+        .from(plans)
+        .where(and(eq(plans.id, payload.planId), isNull(plans.deletedAt)))
+        .limit(1);
+
+      if (!plan) {
+        throw new BadRequestException('Plano nao encontrado');
+      }
+    }
+
+    const updateData: Partial<typeof users.$inferInsert> = {};
+    if (payload.email !== undefined) {
+      updateData.email = payload.email.toLowerCase();
+    }
+    if (payload.cpf !== undefined) {
+      updateData.cpf = payload.cpf;
+    }
+    if (payload.name !== undefined) {
+      updateData.name = payload.name;
+    }
+    if (payload.phone !== undefined) {
+      updateData.phone = payload.phone;
+    }
+    if (payload.address !== undefined) {
+      updateData.address = payload.address;
+    }
+    if (payload.image !== undefined) {
+      updateData.image = payload.image;
+    }
+    if (payload.active !== undefined) {
+      updateData.active = payload.active;
+    }
+    if (payload.role !== undefined) {
+      updateData.role = payload.role;
+    }
+    if (payload.planId !== undefined) {
+      updateData.planId = payload.planId;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return current;
+    }
+
+    const [updated] = await this.databaseService.database
+      .update(users)
+      .set({ ...updateData, updatedAt: new Date() })
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .returning({
+        id: users.id,
+        email: users.email,
+        emailVerified: users.emailVerified,
+        cpf: users.cpf,
+        name: users.name,
+        image: users.image,
+        address: users.address,
+        phone: users.phone,
+        active: users.active,
+        role: users.role,
+        planId: users.planId,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
+      });
+
+    const result = updated ?? null;
+
+    await this.auditService.log({
+      actorUserId: actor.actorUserId,
+      targetUserId: userId,
+      entity: 'user',
+      entityId: userId,
+      action: 'USER_UPDATE',
+      before: current,
+      after: result ?? current,
+      metadata: {
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      },
+    });
+
+    return result;
   }
 
   async completeProfile(
@@ -73,13 +278,28 @@ export class UsersService {
       throw new BadRequestException('CPF já cadastrado');
     }
 
-    const payload = {
+    const payload: {
+      cpf: string;
+      name?: string | null;
+      phone?: string | null;
+      address?: string | null;
+      image?: string | null;
+    } = {
       cpf: completeProfileDto.cpf,
-      name: completeProfileDto.name ?? null,
-      phone: completeProfileDto.phone ?? null,
-      address: completeProfileDto.address ?? null,
-      image: completeProfileDto.image ?? null,
     };
+
+    if (completeProfileDto.name !== undefined) {
+      payload.name = completeProfileDto.name;
+    }
+    if (completeProfileDto.phone !== undefined) {
+      payload.phone = completeProfileDto.phone;
+    }
+    if (completeProfileDto.address !== undefined) {
+      payload.address = completeProfileDto.address;
+    }
+    if (completeProfileDto.image !== undefined) {
+      payload.image = completeProfileDto.image;
+    }
 
     const [user] = await this.databaseService.database
       .update(users)

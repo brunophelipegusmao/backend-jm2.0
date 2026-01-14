@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
+import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../db/database.service';
 import { healthProfiles } from '../drizzle/schema/health';
 import { CreateHealthDto } from './dto/create-health.dto';
@@ -27,9 +28,18 @@ type HealthInput = {
   targetBodyFatPercent?: number | string | null;
 };
 
+type AuditActor = {
+  actorUserId: string;
+  ip?: string;
+  userAgent?: string;
+};
+
 @Injectable()
 export class HealthService {
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly auditService: AuditService,
+  ) {}
 
   private toNumber(value: number | string | null | undefined) {
     if (value === null || value === undefined) {
@@ -82,6 +92,14 @@ export class HealthService {
     }
     const bmiCategory = this.bmiCategoryForProfile(profile.birthDate, profile.bmi);
     return { ...profile, bmiCategory };
+  }
+
+  private stripBmiCategory<T extends Record<string, any>>(profile: T | null) {
+    if (!profile) {
+      return profile;
+    }
+    const { bmiCategory, ...rest } = profile;
+    return rest;
   }
 
   private computeDerivedFields(input: HealthInput) {
@@ -217,6 +235,10 @@ export class HealthService {
     return this.attachBmiCategory(profile ?? null);
   }
 
+  findByUserIdForAdmin(userId: string) {
+    return this.findMe(userId);
+  }
+
   async upsertForUser(userId: string, createHealthDto: CreateHealthDto) {
     if (!createHealthDto.birthDate) {
       throw new BadRequestException('birthDate é obrigatório');
@@ -245,6 +267,42 @@ export class HealthService {
       })
       .returning();
     return this.attachBmiCategory(profile ?? null);
+  }
+
+  async upsertForUserAdmin(
+    userId: string,
+    createHealthDto: CreateHealthDto,
+    actor: AuditActor,
+  ) {
+    const [before] = await this.databaseService.database
+      .select()
+      .from(healthProfiles)
+      .where(
+        and(
+          eq(healthProfiles.userId, userId),
+          isNull(healthProfiles.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    const updated = await this.upsertForUser(userId, createHealthDto);
+
+    const auditAfter = this.stripBmiCategory(updated as Record<string, any> | null);
+    await this.auditService.log({
+      actorUserId: actor.actorUserId,
+      targetUserId: userId,
+      entity: 'health',
+      entityId: updated?.id ? String(updated.id) : userId,
+      action: before ? 'HEALTH_UPDATE' : 'HEALTH_CREATE',
+      before: before ?? null,
+      after: auditAfter ?? null,
+      metadata: {
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      },
+    });
+
+    return updated;
   }
 
   async updateForUser(userId: string, updateHealthDto: UpdateHealthDto) {
@@ -283,6 +341,42 @@ export class HealthService {
       .returning();
 
     return this.attachBmiCategory(profile ?? null);
+  }
+
+  async updateForUserAdmin(
+    userId: string,
+    updateHealthDto: UpdateHealthDto,
+    actor: AuditActor,
+  ) {
+    const [before] = await this.databaseService.database
+      .select()
+      .from(healthProfiles)
+      .where(
+        and(
+          eq(healthProfiles.userId, userId),
+          isNull(healthProfiles.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    const updated = await this.updateForUser(userId, updateHealthDto);
+    const auditAfter = this.stripBmiCategory(updated as Record<string, any> | null);
+
+    await this.auditService.log({
+      actorUserId: actor.actorUserId,
+      targetUserId: userId,
+      entity: 'health',
+      entityId: updated?.id ? String(updated.id) : userId,
+      action: 'HEALTH_UPDATE',
+      before: before ?? null,
+      after: auditAfter ?? null,
+      metadata: {
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      },
+    });
+
+    return updated;
   }
 
   async removeForUser(userId: string) {

@@ -50,6 +50,13 @@
       "when": 1768333979008,
       "tag": "0006_glossy_stellaris",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1768353605653,
+      "tag": "0007_jazzy_marvel_apes",
+      "breakpoints": true
     }
   ]
 }

@@ -29,7 +29,7 @@ export class ProfileCompletionGuard implements CanActivate {
       return true;
     }
 
-    if (path?.startsWith('/api/auth')) {
+    if (path?.startsWith('/api/auth') || path?.startsWith('/auth')) {
       return true;
     }
 
@@ -48,12 +48,12 @@ export class ProfileCompletionGuard implements CanActivate {
     }
 
     const [user] = await this.databaseService.database
-      .select({ cpf: users.cpf })
+      .select({ cpf: users.cpf, active: users.active })
       .from(users)
       .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
 
-    if (!user) {
+    if (!user || !user.active) {
       throw new ForbiddenException('Usuario inativo');
     }
 

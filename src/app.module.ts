@@ -7,10 +7,12 @@ import { AppService } from './app.service';
 import { auth } from './auth';
 import { DatabaseModule } from './db/database.module';
 import { ProfileCompletionGuard } from './auth/profile-completion.guard';
+import { AuthRoutesModule } from './auth/auth-routes.module';
 import { UsersModule } from './users/users.module';
 import { HealthModule } from './health/health.module';
 import { CheckinModule } from './checkin/checkin.module';
 import { PlansModule } from './plans/plans.module';
+import { FinancialModule } from './financial/financial.module';
 
 @Module({
   imports: [
@@ -22,9 +24,11 @@ import { PlansModule } from './plans/plans.module';
       disableTrustedOriginsCors: true,
       disableGlobalAuthGuard: process.env.NODE_ENV !== 'production',
     }),
+    AuthRoutesModule,
     HealthModule,
     CheckinModule,
     PlansModule,
+    FinancialModule,
   ],
   controllers: [AppController],
   providers: [
