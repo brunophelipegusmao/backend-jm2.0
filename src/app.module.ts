@@ -13,6 +13,7 @@ import { HealthModule } from './health/health.module';
 import { CheckinModule } from './checkin/checkin.module';
 import { PlansModule } from './plans/plans.module';
 import { FinancialModule } from './financial/financial.module';
+import { EventsModule } from './events/events.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { FinancialModule } from './financial/financial.module';
     CheckinModule,
     PlansModule,
     FinancialModule,
+    EventsModule,
   ],
   controllers: [AppController],
   providers: [
