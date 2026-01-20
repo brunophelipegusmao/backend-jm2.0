@@ -8,6 +8,7 @@ import type { Request } from 'express';
 import { and, eq, isNull } from 'drizzle-orm';
 import { DatabaseService } from '../db/database.service';
 import { healthProfiles } from '../drizzle/schema/health';
+import { plans } from '../drizzle/schema/plans';
 import { users } from '../drizzle/schema/users';
 
 type SessionUser = { id?: string };
@@ -16,6 +17,10 @@ type AuthSession = { user?: SessionUser };
 type RequestWithSession = Request & {
   session?: AuthSession;
 };
+
+const FREE_PLAN_SLUG = process.env.FREE_PLAN_SLUG || 'free';
+const LEGACY_FREE_PLAN_SLUG = 'padrao';
+const FREE_PLAN_SLUGS = new Set([FREE_PLAN_SLUG, LEGACY_FREE_PLAN_SLUG]);
 
 @Injectable()
 export class ProfileCompletionGuard implements CanActivate {
@@ -52,8 +57,13 @@ export class ProfileCompletionGuard implements CanActivate {
     }
 
     const [user] = await this.databaseService.database
-      .select({ cpf: users.cpf, active: users.active })
+      .select({
+        cpf: users.cpf,
+        active: users.active,
+        planSlug: plans.slug,
+      })
       .from(users)
+      .leftJoin(plans, eq(users.planId, plans.id))
       .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
 
@@ -61,19 +71,24 @@ export class ProfileCompletionGuard implements CanActivate {
       throw new ForbiddenException('Usuario inativo');
     }
 
-    const [health] = await this.databaseService.database
-      .select({ id: healthProfiles.id })
-      .from(healthProfiles)
-      .where(
-        and(
-          eq(healthProfiles.userId, userId),
-          isNull(healthProfiles.deletedAt),
-        ),
-      )
-      .limit(1);
-
     const missingCpf = !user?.cpf;
-    const missingHealth = !health;
+    const requiresHealth = !user.planSlug || !FREE_PLAN_SLUGS.has(user.planSlug);
+    let missingHealth = false;
+
+    if (requiresHealth) {
+      const [health] = await this.databaseService.database
+        .select({ id: healthProfiles.id })
+        .from(healthProfiles)
+        .where(
+          and(
+            eq(healthProfiles.userId, userId),
+            isNull(healthProfiles.deletedAt),
+          ),
+        )
+        .limit(1);
+
+      missingHealth = !health;
+    }
 
     if (missingCpf || missingHealth) {
       throw new ForbiddenException({

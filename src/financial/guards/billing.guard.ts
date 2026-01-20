@@ -23,6 +23,8 @@ type RequestWithSession = Request & { session?: AuthSession };
 
 const DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
 const FREE_PLAN_SLUG = process.env.FREE_PLAN_SLUG || 'free';
+const LEGACY_FREE_PLAN_SLUG = 'padrao';
+const FREE_PLAN_SLUGS = new Set([FREE_PLAN_SLUG, LEGACY_FREE_PLAN_SLUG]);
 
 type BillingDatabase = DatabaseService['database'];
 
@@ -77,7 +79,7 @@ export const ensureUserBillingStatus = async (
     .where(and(eq(users.id, userId), isNull(users.deletedAt)))
     .limit(1);
 
-  if (userPlan?.planSlug === FREE_PLAN_SLUG) {
+  if (userPlan?.planSlug && FREE_PLAN_SLUGS.has(userPlan.planSlug)) {
     throw new ForbiddenException('Plano free nao permite check-in');
   }
 

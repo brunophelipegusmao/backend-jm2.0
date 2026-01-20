@@ -36,7 +36,9 @@ if (!googleClientSecret) {
 const sql = neon(databaseUrl);
 const db = drizzle(sql, { schema });
 
-const defaultPlanSlug = process.env.DEFAULT_PLAN_SLUG || 'free';
+const FREE_PLAN_SLUG = process.env.FREE_PLAN_SLUG || 'free';
+const LEGACY_FREE_PLAN_SLUG = 'padrao';
+const defaultPlanSlug = FREE_PLAN_SLUG;
 let cachedDefaultPlanId: string | null = null;
 
 const getDefaultPlanId = async () => {
@@ -57,6 +59,70 @@ const getDefaultPlanId = async () => {
     .limit(1);
 
   if (!plan) {
+    const planName =
+      defaultPlanSlug === LEGACY_FREE_PLAN_SLUG ? 'Plano Padrao' : 'Plano Free';
+    const planDescription =
+      defaultPlanSlug === LEGACY_FREE_PLAN_SLUG
+        ? null
+        : 'Plano gratuito para eventos';
+
+    const [created] = await db
+      .insert(plans)
+      .values({
+        name: planName,
+        slug: defaultPlanSlug,
+        description: planDescription,
+        priceCents: 0,
+        promoPriceCents: null,
+        promoActive: false,
+        promoEndsAt: null,
+        popular: false,
+        active: true,
+      })
+      .onConflictDoNothing()
+      .returning({ id: plans.id });
+
+    if (created?.id) {
+      cachedDefaultPlanId = created.id;
+      return created.id;
+    }
+
+    const [existingPlan] = await db
+      .select({ id: plans.id })
+      .from(plans)
+      .where(
+        and(
+          eq(plans.slug, defaultPlanSlug),
+          eq(plans.active, true),
+          isNull(plans.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (existingPlan?.id) {
+      cachedDefaultPlanId = existingPlan.id;
+      return existingPlan.id;
+    }
+
+    if (defaultPlanSlug !== LEGACY_FREE_PLAN_SLUG) {
+      const [legacyPlan] = await db
+        .select({ id: plans.id })
+        .from(plans)
+        .where(
+          and(
+            eq(plans.slug, LEGACY_FREE_PLAN_SLUG),
+            eq(plans.active, true),
+            isNull(plans.deletedAt),
+          ),
+        )
+        .limit(1);
+
+      if (legacyPlan?.id) {
+        cachedDefaultPlanId = legacyPlan.id;
+        return legacyPlan.id;
+      }
+    }
+
     throw new APIError('BAD_REQUEST', {
       message: 'Plano padrao nao configurado',
     });
