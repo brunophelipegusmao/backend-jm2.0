@@ -14,6 +14,7 @@ import {
 } from '../../drizzle/schema/financial';
 import { plans } from '../../drizzle/schema/plans';
 import { users } from '../../drizzle/schema/users';
+import { FREE_PLAN_SLUGS } from '../../common/constants/plans';
 
 type SessionUser = { id?: string };
 
@@ -22,9 +23,6 @@ type AuthSession = { user?: SessionUser };
 type RequestWithSession = Request & { session?: AuthSession };
 
 const DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
-const FREE_PLAN_SLUG = process.env.FREE_PLAN_SLUG || 'free';
-const LEGACY_FREE_PLAN_SLUG = 'padrao';
-const FREE_PLAN_SLUGS = new Set([FREE_PLAN_SLUG, LEGACY_FREE_PLAN_SLUG]);
 
 type BillingDatabase = DatabaseService['database'];
 

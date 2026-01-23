@@ -27,6 +27,10 @@ import {
   CompleteProfileDto,
   completeProfileSchema,
 } from './dto/complete-profile.dto';
+import {
+  ConvertGuestDto,
+  convertGuestSchema,
+} from './dto/convert-guest.dto';
 
 @Controller('users')
 @UseGuards(AuthGuard)
@@ -62,6 +66,26 @@ export class UsersController {
     return this.usersService.completeProfile(
       { user: { id: this.requireUserId(session) } },
       completeProfileDto,
+    );
+  }
+
+  @Post('me/convert-guest')
+  convertGuest(
+    @Session() session: UserSession,
+    @Body(new ZodValidationPipe(convertGuestSchema))
+    convertGuestDto: ConvertGuestDto,
+    @Req() request: Request,
+  ) {
+    const actorId = this.requireUserId(session);
+    const userAgentHeader = request.headers['user-agent'];
+    return this.usersService.convertGuestToStudent(
+      { user: { id: actorId } },
+      convertGuestDto,
+      {
+        actorUserId: actorId,
+        ip: request.ip,
+        userAgent: typeof userAgentHeader === 'string' ? userAgentHeader : undefined,
+      },
     );
   }
 

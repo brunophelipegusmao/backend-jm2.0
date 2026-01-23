@@ -6,7 +6,10 @@ import { DatabaseService } from '../db/database.service';
 import { healthProfiles } from '../drizzle/schema/health';
 import { plans } from '../drizzle/schema/plans';
 import { account, users } from '../drizzle/schema/users';
+import { ensureMasterPlanId } from '../plans/plan.utils';
+import { FREE_PLAN_SLUGS } from '../common/constants/plans';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
+import { ConvertGuestDto } from './dto/convert-guest.dto';
 import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 
 type AuditContext = {
@@ -200,7 +203,34 @@ export class UsersService {
       }
     }
 
-    if (payload.planId) {
+    if (payload.role === 'MASTER' && current.role !== 'MASTER') {
+      const [existingMaster] = await this.databaseService.database
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(eq(users.role, 'MASTER'), isNull(users.deletedAt)),
+        )
+        .limit(1);
+
+      if (existingMaster) {
+        throw new BadRequestException('Ja existe um master cadastrado');
+      }
+    }
+
+    if (payload.role === 'GUEST') {
+      const phoneNumber = payload.phone ?? current.phone;
+      if (!phoneNumber) {
+        throw new BadRequestException('Telefone obrigatorio para convidados');
+      }
+    }
+
+    let planIdToApply: string | undefined;
+    const requiresMasterPlan =
+      payload.role === 'MASTER' || payload.role === 'ADMIN';
+
+    if (requiresMasterPlan) {
+      planIdToApply = await ensureMasterPlanId(this.databaseService.database);
+    } else if (payload.planId !== undefined) {
       const [plan] = await this.databaseService.database
         .select({ id: plans.id })
         .from(plans)
@@ -210,6 +240,8 @@ export class UsersService {
       if (!plan) {
         throw new BadRequestException('Plano nao encontrado');
       }
+
+      planIdToApply = payload.planId;
     }
 
     const updateData: Partial<typeof users.$inferInsert> = {};
@@ -237,8 +269,8 @@ export class UsersService {
     if (payload.role !== undefined) {
       updateData.role = payload.role;
     }
-    if (payload.planId !== undefined) {
-      updateData.planId = payload.planId;
+    if (planIdToApply !== undefined) {
+      updateData.planId = planIdToApply;
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -337,6 +369,98 @@ export class UsersService {
       .where(and(eq(users.id, session.user.id), isNull(users.deletedAt)))
       .returning();
     return user ?? null;
+  }
+
+  async convertGuestToStudent(
+    session: { user?: { id?: string } },
+    convertGuestDto: ConvertGuestDto,
+    audit?: AuditContext,
+  ) {
+    if (!session?.user?.id) {
+      throw new BadRequestException('Sessão inválida');
+    }
+    const userId = session.user.id;
+
+    const [current] = await this.databaseService.database
+      .select({
+        id: users.id,
+        role: users.role,
+        email: users.email,
+        active: users.active,
+        planId: users.planId,
+      })
+      .from(users)
+      .where(
+        and(eq(users.id, userId), eq(users.role, 'GUEST'), isNull(users.deletedAt)),
+      )
+      .limit(1);
+
+    if (!current || !current.active) {
+      throw new BadRequestException('Usuario nao encontrado ou inativo');
+    }
+
+    const [plan] = await this.databaseService.database
+      .select({ id: plans.id, slug: plans.slug })
+      .from(plans)
+      .where(and(eq(plans.id, convertGuestDto.planId), isNull(plans.deletedAt)))
+      .limit(1);
+
+    if (!plan) {
+      throw new BadRequestException('Plano nao encontrado');
+    }
+
+    if (FREE_PLAN_SLUGS.has(plan.slug)) {
+      throw new BadRequestException('Selecione um plano valido');
+    }
+
+    const updateData: Partial<typeof users.$inferInsert> = {
+      cpf: convertGuestDto.cpf,
+      phone: convertGuestDto.phone,
+      role: 'STUDENT',
+      planId: plan.id,
+      updatedAt: new Date(),
+    };
+
+    if (convertGuestDto.name !== undefined) {
+      updateData.name = convertGuestDto.name;
+    }
+
+    const [updated] = await this.databaseService.database
+      .update(users)
+      .set(updateData)
+      .where(and(eq(users.id, userId), eq(users.role, 'GUEST'), isNull(users.deletedAt)))
+      .returning({
+        id: users.id,
+        email: users.email,
+        emailVerified: users.emailVerified,
+        cpf: users.cpf,
+        name: users.name,
+        image: users.image,
+        avatarPublicId: users.avatarPublicId,
+        avatarUrl: users.avatarUrl,
+        address: users.address,
+        phone: users.phone,
+        active: users.active,
+        role: users.role,
+        planId: users.planId,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
+      });
+
+    const result = updated ?? null;
+
+    await this.auditService.log({
+      actorUserId: audit?.actorUserId ?? userId,
+      targetUserId: userId,
+      entity: 'user',
+      entityId: userId,
+      action: 'guest_to_student',
+      before: current,
+      after: result ?? current,
+      metadata: this.buildAuditMetadata(audit),
+    });
+
+    return result;
   }
 
   async updateAvatar(

@@ -11,6 +11,15 @@ import { and, eq, isNull } from 'drizzle-orm';
 import * as schema from './drizzle/schema';
 import { plans } from './drizzle/schema/plans';
 import { users } from './drizzle/schema/users';
+import {
+  FREE_PLAN_SLUG,
+  LEGACY_FREE_PLAN_SLUG,
+} from './common/constants/plans';
+import {
+  ensureMasterPlanId,
+  ensurePlanBySlug,
+  findActivePlanIdBySlug,
+} from './plans/plan.utils';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -36,8 +45,6 @@ if (!googleClientSecret) {
 const sql = neon(databaseUrl);
 const db = drizzle(sql, { schema });
 
-const FREE_PLAN_SLUG = process.env.FREE_PLAN_SLUG || 'free';
-const LEGACY_FREE_PLAN_SLUG = 'padrao';
 const defaultPlanSlug = FREE_PLAN_SLUG;
 let cachedDefaultPlanId: string | null = null;
 
@@ -46,90 +53,50 @@ const getDefaultPlanId = async () => {
     return cachedDefaultPlanId;
   }
 
-  const [plan] = await db
-    .select({ id: plans.id })
-    .from(plans)
-    .where(
-      and(
-        eq(plans.slug, defaultPlanSlug),
-        eq(plans.active, true),
-        isNull(plans.deletedAt),
-      ),
-    )
-    .limit(1);
-
-  if (!plan) {
-    const planName =
-      defaultPlanSlug === LEGACY_FREE_PLAN_SLUG ? 'Plano Padrao' : 'Plano Free';
-    const planDescription =
-      defaultPlanSlug === LEGACY_FREE_PLAN_SLUG
-        ? null
-        : 'Plano gratuito para eventos';
-
-    const [created] = await db
-      .insert(plans)
-      .values({
-        name: planName,
-        slug: defaultPlanSlug,
-        description: planDescription,
-        priceCents: 0,
-        promoPriceCents: null,
-        promoActive: false,
-        promoEndsAt: null,
-        popular: false,
-        active: true,
-      })
-      .onConflictDoNothing()
-      .returning({ id: plans.id });
-
-    if (created?.id) {
-      cachedDefaultPlanId = created.id;
-      return created.id;
-    }
-
-    const [existingPlan] = await db
-      .select({ id: plans.id })
-      .from(plans)
-      .where(
-        and(
-          eq(plans.slug, defaultPlanSlug),
-          eq(plans.active, true),
-          isNull(plans.deletedAt),
-        ),
-      )
-      .limit(1);
-
-    if (existingPlan?.id) {
-      cachedDefaultPlanId = existingPlan.id;
-      return existingPlan.id;
-    }
-
-    if (defaultPlanSlug !== LEGACY_FREE_PLAN_SLUG) {
-      const [legacyPlan] = await db
-        .select({ id: plans.id })
-        .from(plans)
-        .where(
-          and(
-            eq(plans.slug, LEGACY_FREE_PLAN_SLUG),
-            eq(plans.active, true),
-            isNull(plans.deletedAt),
-          ),
-        )
-        .limit(1);
-
-      if (legacyPlan?.id) {
-        cachedDefaultPlanId = legacyPlan.id;
-        return legacyPlan.id;
-      }
-    }
-
-    throw new APIError('BAD_REQUEST', {
-      message: 'Plano padrao nao configurado',
-    });
+  const planId = await findActivePlanIdBySlug(db, defaultPlanSlug);
+  if (planId) {
+    cachedDefaultPlanId = planId;
+    return planId;
   }
 
-  cachedDefaultPlanId = plan.id;
-  return plan.id;
+  if (defaultPlanSlug !== LEGACY_FREE_PLAN_SLUG) {
+    const legacyPlanId = await findActivePlanIdBySlug(db, LEGACY_FREE_PLAN_SLUG);
+    if (legacyPlanId) {
+      cachedDefaultPlanId = legacyPlanId;
+      return legacyPlanId;
+    }
+  }
+
+  const planName =
+    defaultPlanSlug === LEGACY_FREE_PLAN_SLUG ? 'Plano Padrao' : 'Plano Free';
+  const planDescription =
+    defaultPlanSlug === LEGACY_FREE_PLAN_SLUG
+      ? null
+      : 'Plano gratuito para eventos';
+
+  cachedDefaultPlanId = await ensurePlanBySlug(db, {
+    slug: defaultPlanSlug,
+    name: planName,
+    description: planDescription,
+    priceCents: 0,
+    promoPriceCents: null,
+    promoActive: false,
+    popular: false,
+    active: true,
+  });
+
+  return cachedDefaultPlanId;
+};
+
+const hasMasterUser = async () => {
+  const [master] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(eq(users.role, 'MASTER'), isNull(users.deletedAt)),
+    )
+    .limit(1);
+  return Boolean(master);
 };
 
 const authSchema = {
@@ -261,12 +228,33 @@ export const auth = betterAuth({
     user: {
       create: {
         before: async (user) => {
-          const planId = (user as { planId?: string | null }).planId;
-          if (planId) {
-            return;
+          const payload = user as { planId?: string | null; role?: string };
+          const result: Record<string, unknown> = {};
+          const masterExists = await hasMasterUser();
+
+          if (!masterExists) {
+            result.role = 'MASTER';
+            result.planId = await ensureMasterPlanId(db);
+            return { data: result };
           }
-          const resolvedPlanId = await getDefaultPlanId();
-          return { data: { planId: resolvedPlanId } };
+
+          if (payload.role === 'MASTER') {
+            throw new APIError('BAD_REQUEST', {
+              message: 'Ja existe um master cadastrado',
+            });
+          }
+
+          if (payload.role === 'ADMIN') {
+            result.planId = await ensureMasterPlanId(db);
+            return { data: result };
+          }
+
+          if (!payload.planId) {
+            result.planId = await getDefaultPlanId();
+            return { data: result };
+          }
+
+          return;
         },
       },
     },
