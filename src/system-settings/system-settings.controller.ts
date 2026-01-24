@@ -15,6 +15,13 @@ export class SystemSettingsController {
     return this.systemSettingsService.getSettings();
   }
 
+  @Get('carousel')
+  @AllowAnonymous()
+  async getCarouselImages() {
+    const settings = await this.systemSettingsService.getSettings();
+    return settings.carouselImages;
+  }
+
   @Patch()
   updateSettings(
     @Session() session: UserSession,

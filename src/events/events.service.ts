@@ -779,13 +779,16 @@ export class EventsService {
       }
     }
 
-    return this.databaseService.database
+    const rows = await this.databaseService.database
       .select({
         title: events.title,
         slug: events.slug,
+        description: events.description,
         date: events.date,
         time: events.time,
         endTime: events.endTime,
+        location: events.location,
+        hideLocation: events.hideLocation,
         thumbnailUrl: events.thumbnailUrl,
         accessMode: events.accessMode,
         capacity: events.capacity,
@@ -793,6 +796,11 @@ export class EventsService {
       .from(events)
       .where(and(...whereFilters))
       .orderBy(asc(events.date), asc(events.time));
+
+    return rows.map((event) => ({
+      ...event,
+      location: event.hideLocation ? null : event.location,
+    }));
   }
 
   async listCalendar(filters?: PublicEventsQueryDto) {

@@ -70,12 +70,45 @@ const authSchema = {
 };
 
 const frontendUrl = process.env.FRONTEND_URL;
-const trustedOrigins = [betterAuthUrl, frontendUrl].filter(Boolean) as string[];
+const normalizeAuthBaseUrl = (baseUrl: string) => {
+  const trimmed = baseUrl.replace(/\/+$/, '');
+  if (trimmed.endsWith('/api/auth')) {
+    return trimmed;
+  }
+  return `${trimmed}/api/auth`;
+};
+
+const betterAuthBaseUrl = normalizeAuthBaseUrl(betterAuthUrl);
+const betterAuthOrigin = new URL(betterAuthUrl).origin;
+const trustedOrigins = [betterAuthOrigin, frontendUrl].filter(Boolean) as string[];
 const socialProviders = {
   google: {
     clientId: googleClientId,
     clientSecret: googleClientSecret,
   },
+};
+
+const resetPasswordWebhookUrl = process.env.RESET_PASSWORD_WEBHOOK_URL;
+
+const sendResetPassword = async (payload: {
+  user: { email?: string | null; name?: string | null };
+  url: string;
+}) => {
+  const email = payload.user.email ?? 'email-indisponivel';
+  if (resetPasswordWebhookUrl) {
+    await fetch(resetPasswordWebhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        name: payload.user.name ?? undefined,
+        url: payload.url,
+      }),
+    });
+    return;
+  }
+
+  console.info(`[auth] Reset password link for ${email}: ${payload.url}`);
 };
 
 const normalizeUrl = (base: string, path: string) => {
@@ -156,7 +189,7 @@ const authPolicyPlugin = {
 
 export const auth = betterAuth({
   secret: betterAuthSecret,
-  baseURL: betterAuthUrl,
+  baseURL: betterAuthBaseUrl,
   trustedOrigins,
   database: drizzleAdapter(db, {
     provider: 'pg',
@@ -183,6 +216,7 @@ export const auth = betterAuth({
   },
   emailAndPassword: {
     enabled: true,
+    sendResetPassword,
   },
   databaseHooks: {
     user: {
