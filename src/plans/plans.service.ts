@@ -142,6 +142,10 @@ export class PlansService {
         promoEndsAt: promo.promoEndsAt ?? null,
         popular: createPlanDto.popular ?? false,
         active: createPlanDto.active ?? true,
+        durationDays:
+          createPlanDto.durationDays !== undefined
+            ? createPlanDto.durationDays ?? null
+            : null,
       })
       .returning();
 
@@ -199,6 +203,10 @@ export class PlansService {
 
     if (updatePlanDto.priceCents !== undefined) {
       updates.priceCents = updatePlanDto.priceCents;
+    }
+
+    if (updatePlanDto.durationDays !== undefined) {
+      updates.durationDays = updatePlanDto.durationDays ?? null;
     }
 
     if (

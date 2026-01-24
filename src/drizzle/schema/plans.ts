@@ -25,6 +25,7 @@ export const plans = pgTable(
     promoEndsAt: timestamp('promo_ends_at', { withTimezone: true }),
     popular: boolean('popular').notNull().default(false),
     active: boolean('active').notNull().default(true),
+    durationDays: integer('duration_days'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()

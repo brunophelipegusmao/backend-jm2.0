@@ -2,6 +2,8 @@ import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
 import { and, eq, isNull } from 'drizzle-orm';
 import { plans } from '../drizzle/schema/plans';
 import {
+  FREE_PLAN_SLUG,
+  LEGACY_FREE_PLAN_SLUG,
   MASTER_PLAN_DESCRIPTION,
   MASTER_PLAN_NAME,
   MASTER_PLAN_SLUG,
@@ -17,6 +19,7 @@ export type EnsurePlanOptions = {
   promoEndsAt?: Date | null;
   popular?: boolean;
   active?: boolean;
+  durationDays?: number | null;
 };
 
 export async function findActivePlanIdBySlug(
@@ -55,6 +58,7 @@ export async function ensurePlanBySlug(
       promoEndsAt: options.promoEndsAt ?? null,
       popular: options.popular ?? false,
       active: options.active ?? true,
+      durationDays: options.durationDays ?? null,
     })
     .onConflictDoNothing()
     .returning({ id: plans.id });
@@ -72,6 +76,51 @@ export async function ensurePlanBySlug(
 }
 
 let cachedMasterPlanId: string | null = null;
+
+let cachedFreePlanId: string | null = null;
+
+export async function ensureFreePlanId(database: NeonHttpDatabase) {
+  if (cachedFreePlanId) {
+    return cachedFreePlanId;
+  }
+
+  const freePlanId = await findActivePlanIdBySlug(database, FREE_PLAN_SLUG);
+  if (freePlanId) {
+    cachedFreePlanId = freePlanId;
+    return freePlanId;
+  }
+
+  if (LEGACY_FREE_PLAN_SLUG !== FREE_PLAN_SLUG) {
+    const legacyPlanId = await findActivePlanIdBySlug(
+      database,
+      LEGACY_FREE_PLAN_SLUG,
+    );
+    if (legacyPlanId) {
+      cachedFreePlanId = legacyPlanId;
+      return legacyPlanId;
+    }
+  }
+
+  const planName =
+    FREE_PLAN_SLUG === LEGACY_FREE_PLAN_SLUG ? 'Plano Padrao' : 'Plano Free';
+
+  cachedFreePlanId = await ensurePlanBySlug(database, {
+    slug: FREE_PLAN_SLUG,
+    name: planName,
+    description:
+      FREE_PLAN_SLUG === LEGACY_FREE_PLAN_SLUG
+        ? null
+        : 'Plano gratuito para eventos',
+    priceCents: 0,
+    promoPriceCents: null,
+    promoActive: false,
+    popular: false,
+    active: true,
+    durationDays: null,
+  });
+
+  return cachedFreePlanId;
+}
 
 export async function ensureMasterPlanId(database: NeonHttpDatabase) {
   if (cachedMasterPlanId) {

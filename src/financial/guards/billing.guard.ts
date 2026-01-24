@@ -15,6 +15,7 @@ import {
 import { plans } from '../../drizzle/schema/plans';
 import { users } from '../../drizzle/schema/users';
 import { FREE_PLAN_SLUGS } from '../../common/constants/plans';
+import { FinancialService } from '../../financial/financial.service';
 
 type SessionUser = { id?: string };
 
@@ -141,7 +142,10 @@ export const ensureUserBillingStatus = async (
 
 @Injectable()
 export class BillingGuard implements CanActivate {
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly financialService: FinancialService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithSession>();
@@ -160,6 +164,10 @@ export class BillingGuard implements CanActivate {
     if (!user || !user.active) {
       throw new ForbiddenException('Usuario inativo');
     }
+
+    await this.financialService.expireSubscriptionIfNeeded(userId, {
+      actorUserId: userId,
+    });
 
     await ensureUserBillingStatus(this.databaseService.database, userId);
 

@@ -11,15 +11,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import * as schema from './drizzle/schema';
 import { plans } from './drizzle/schema/plans';
 import { users } from './drizzle/schema/users';
-import {
-  FREE_PLAN_SLUG,
-  LEGACY_FREE_PLAN_SLUG,
-} from './common/constants/plans';
-import {
-  ensureMasterPlanId,
-  ensurePlanBySlug,
-  findActivePlanIdBySlug,
-} from './plans/plan.utils';
+import { ensureMasterPlanId, ensureFreePlanId } from './plans/plan.utils';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -45,7 +37,6 @@ if (!googleClientSecret) {
 const sql = neon(databaseUrl);
 const db = drizzle(sql, { schema });
 
-const defaultPlanSlug = FREE_PLAN_SLUG;
 let cachedDefaultPlanId: string | null = null;
 
 const getDefaultPlanId = async () => {
@@ -53,38 +44,7 @@ const getDefaultPlanId = async () => {
     return cachedDefaultPlanId;
   }
 
-  const planId = await findActivePlanIdBySlug(db, defaultPlanSlug);
-  if (planId) {
-    cachedDefaultPlanId = planId;
-    return planId;
-  }
-
-  if (defaultPlanSlug !== LEGACY_FREE_PLAN_SLUG) {
-    const legacyPlanId = await findActivePlanIdBySlug(db, LEGACY_FREE_PLAN_SLUG);
-    if (legacyPlanId) {
-      cachedDefaultPlanId = legacyPlanId;
-      return legacyPlanId;
-    }
-  }
-
-  const planName =
-    defaultPlanSlug === LEGACY_FREE_PLAN_SLUG ? 'Plano Padrao' : 'Plano Free';
-  const planDescription =
-    defaultPlanSlug === LEGACY_FREE_PLAN_SLUG
-      ? null
-      : 'Plano gratuito para eventos';
-
-  cachedDefaultPlanId = await ensurePlanBySlug(db, {
-    slug: defaultPlanSlug,
-    name: planName,
-    description: planDescription,
-    priceCents: 0,
-    promoPriceCents: null,
-    promoActive: false,
-    popular: false,
-    active: true,
-  });
-
+  cachedDefaultPlanId = await ensureFreePlanId(db);
   return cachedDefaultPlanId;
 };
 

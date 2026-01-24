@@ -14,6 +14,7 @@ import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../db/database.service';
 import { plans } from '../drizzle/schema/plans';
 import { users } from '../drizzle/schema/users';
+import { ensureFreePlanId } from '../plans/plan.utils';
 import {
   expenseTemplates,
   financialExpenses,
@@ -380,6 +381,12 @@ export class FinancialService {
     }
 
     const planSnapshot = this.resolvePlanMonthlyAmount(plan, startsAt);
+    const endsAt =
+      plan.durationDays && plan.durationDays > 0
+        ? new Date(
+            startsAt.getTime() + plan.durationDays * 24 * 60 * 60 * 1000,
+          )
+        : null;
     const notes = payload.notes?.trim() ?? null;
 
     const [subscription] = await this.databaseService.database
@@ -400,6 +407,7 @@ export class FinancialService {
         planSlugSnapshot: plan.slug,
         planPriceCentsSnapshot: planSnapshot.planPriceCentsSnapshot,
         planPromoPriceCentsSnapshot: planSnapshot.planPromoPriceCentsSnapshot,
+        endsAt,
         planMonthsSnapshot: null,
         notes,
       })
@@ -474,6 +482,60 @@ export class FinancialService {
       replacedSubscription,
       proratedReceivable,
     };
+  }
+
+  async expireSubscriptionIfNeeded(
+    userId: string,
+    audit?: AuditContext,
+  ): Promise<SubscriptionRow | null> {
+    const [subscription] = await this.databaseService.database
+      .select()
+      .from(userSubscriptions)
+      .where(
+        and(
+          eq(userSubscriptions.userId, userId),
+          eq(userSubscriptions.status, 'active'),
+          isNull(userSubscriptions.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!subscription || subscription.status !== 'active' || !subscription.endsAt) {
+      return null;
+    }
+
+    const now = new Date();
+    if (subscription.endsAt > now) {
+      return null;
+    }
+
+    const [updated] = await this.databaseService.database
+      .update(userSubscriptions)
+      .set({
+        status: 'finished' as const,
+        updatedAt: new Date(),
+      })
+      .where(eq(userSubscriptions.id, subscription.id))
+      .returning();
+
+    const freePlanId = await ensureFreePlanId(this.databaseService.database);
+    await this.databaseService.database
+      .update(users)
+      .set({ planId: freePlanId })
+      .where(eq(users.id, userId));
+
+    await this.auditService.log({
+      actorUserId: audit?.actorUserId ?? userId,
+      targetUserId: userId,
+      entity: 'financial.subscription',
+      entityId: subscription.id,
+      action: 'subscription_finished',
+      before: subscription,
+      after: updated ?? subscription,
+      metadata: this.buildAuditMetadata(audit),
+    });
+
+    return updated ?? subscription;
   }
 
   async updateSubscription(
