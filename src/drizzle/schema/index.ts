@@ -5,3 +5,4 @@ export * from './plans';
 export * from './audit';
 export * from './financial';
 export * from './events';
+export * from './systemSettings';

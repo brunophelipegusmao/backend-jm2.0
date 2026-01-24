@@ -1,34 +1,26 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
-import { SystemSettingsService } from './system-settings.service';
-import { CreateSystemSettingDto } from './dto/create-system-setting.dto';
-import { UpdateSystemSettingDto } from './dto/update-system-setting.dto';
+import { AllowAnonymous, AuthGuard, Session, UserSession } from '@thallesp/nestjs-better-auth';
+import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import { SystemSettingsService, SystemSettingsResponse } from './system-settings.service';
+import { UpdateSystemSettingsDto, updateSystemSettingsSchema } from './dto/update-system-settings.dto';
 
 @Controller('system-settings')
+@UseGuards(AuthGuard)
 export class SystemSettingsController {
   constructor(private readonly systemSettingsService: SystemSettingsService) {}
 
-  @Post()
-  create(@Body() createSystemSettingDto: CreateSystemSettingDto) {
-    return this.systemSettingsService.create(createSystemSettingDto);
-  }
-
   @Get()
-  findAll() {
-    return this.systemSettingsService.findAll();
+  @AllowAnonymous()
+  getSettings(): Promise<SystemSettingsResponse> {
+    return this.systemSettingsService.getSettings();
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.systemSettingsService.findOne(+id);
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateSystemSettingDto: UpdateSystemSettingDto) {
-    return this.systemSettingsService.update(+id, updateSystemSettingDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.systemSettingsService.remove(+id);
+  @Patch()
+  updateSettings(
+    @Session() session: UserSession,
+    @Body(new ZodValidationPipe(updateSystemSettingsSchema))
+    payload: UpdateSystemSettingsDto,
+  ): Promise<SystemSettingsResponse> {
+    return this.systemSettingsService.updateSettings(session?.user?.role, payload);
   }
 }

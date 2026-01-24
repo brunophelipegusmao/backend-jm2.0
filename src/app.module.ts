@@ -27,12 +27,12 @@ import { SystemSettingsModule } from './system-settings/system-settings.module';
       disableGlobalAuthGuard: process.env.NODE_ENV !== 'production',
     }),
     AuthRoutesModule,
+    SystemSettingsModule,
     HealthModule,
     CheckinModule,
     PlansModule,
     FinancialModule,
     EventsModule,
-    SystemSettingsModule,
   ],
   controllers: [AppController],
   providers: [
