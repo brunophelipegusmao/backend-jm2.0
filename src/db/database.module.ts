@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { DatabaseService } from './database.service';
+import * as schema from '../drizzle/schema';
 
 const dbProvider = {
   provide: 'POSTGRES_POOL',
@@ -20,7 +21,7 @@ const dbProvider = {
 const drizzleProvider = {
   provide: 'DRIZZLE_DB',
   inject: ['POSTGRES_POOL'],
-  useFactory: (sql: ReturnType<typeof neon>) => drizzle(sql),
+  useFactory: (sql: ReturnType<typeof neon>) => drizzle(sql, { schema }),
 };
 
 @Module({

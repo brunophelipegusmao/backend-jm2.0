@@ -8,6 +8,9 @@ import {
   MASTER_PLAN_NAME,
   MASTER_PLAN_SLUG,
 } from '../common/constants/plans';
+import type * as schema from '../drizzle/schema';
+
+export type AppDatabase = NeonHttpDatabase<typeof schema>;
 
 export type EnsurePlanOptions = {
   slug: string;
@@ -23,7 +26,7 @@ export type EnsurePlanOptions = {
 };
 
 export async function findActivePlanIdBySlug(
-  database: NeonHttpDatabase,
+  database: AppDatabase,
   slug: string,
 ) {
   const [plan] = await database
@@ -38,7 +41,7 @@ export async function findActivePlanIdBySlug(
 }
 
 export async function ensurePlanBySlug(
-  database: NeonHttpDatabase,
+  database: AppDatabase,
   options: EnsurePlanOptions,
 ) {
   const existing = await findActivePlanIdBySlug(database, options.slug);
@@ -79,7 +82,7 @@ let cachedMasterPlanId: string | null = null;
 
 let cachedFreePlanId: string | null = null;
 
-export async function ensureFreePlanId(database: NeonHttpDatabase) {
+export async function ensureFreePlanId(database: AppDatabase) {
   if (cachedFreePlanId) {
     return cachedFreePlanId;
   }
@@ -122,7 +125,7 @@ export async function ensureFreePlanId(database: NeonHttpDatabase) {
   return cachedFreePlanId;
 }
 
-export async function ensureMasterPlanId(database: NeonHttpDatabase) {
+export async function ensureMasterPlanId(database: AppDatabase) {
   if (cachedMasterPlanId) {
     return cachedMasterPlanId;
   }

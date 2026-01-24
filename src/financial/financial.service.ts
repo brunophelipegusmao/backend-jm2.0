@@ -331,6 +331,7 @@ export class FinancialService {
         promoPriceCents: plans.promoPriceCents,
         promoActive: plans.promoActive,
         promoEndsAt: plans.promoEndsAt,
+        durationDays: plans.durationDays,
       })
       .from(plans)
       .where(and(eq(plans.id, payload.planId), isNull(plans.deletedAt)))

@@ -14,6 +14,7 @@ import { CheckinModule } from './checkin/checkin.module';
 import { PlansModule } from './plans/plans.module';
 import { FinancialModule } from './financial/financial.module';
 import { EventsModule } from './events/events.module';
+import { SystemSettingsModule } from './system-settings/system-settings.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { EventsModule } from './events/events.module';
     PlansModule,
     FinancialModule,
     EventsModule,
+    SystemSettingsModule,
   ],
   controllers: [AppController],
   providers: [
