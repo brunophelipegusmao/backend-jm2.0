@@ -69,7 +69,8 @@ export class ProfileCompletionGuard implements CanActivate {
     }
 
     const missingCpf = !user?.cpf;
-    const requiresHealth = !user.planSlug || !FREE_PLAN_SLUGS.has(user.planSlug);
+    const requiresHealth =
+      !user.planSlug || !FREE_PLAN_SLUGS.has(user.planSlug);
     let missingHealth = false;
 
     if (requiresHealth) {

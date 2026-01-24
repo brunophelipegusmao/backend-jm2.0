@@ -1,8 +1,5 @@
 import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
-import {
-  AllowAnonymous,
-  AuthGuard,
-} from '@thallesp/nestjs-better-auth';
+import { AllowAnonymous, AuthGuard } from '@thallesp/nestjs-better-auth';
 import type { Request, Response } from 'express';
 import { auth } from '../auth';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
@@ -25,7 +22,10 @@ const applyAuthHeaders = (res: Response, headers?: Headers | null) => {
 export class AuthController {
   @Post('logout')
   @AllowAnonymous()
-  async logout(@Req() request: Request, @Res({ passthrough: true }) res: Response) {
+  async logout(
+    @Req() request: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const result = await auth.api.signOut({
       headers: request.headers as Record<string, string>,
       returnHeaders: true,
