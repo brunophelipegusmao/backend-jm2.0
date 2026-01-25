@@ -1,11 +1,7 @@
 import 'dotenv/config';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
-import {
-  APIError,
-  betterAuth,
-  type BetterAuthPlugin,
-} from 'better-auth';
+import { APIError, betterAuth, type BetterAuthPlugin } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { and, eq, isNull } from 'drizzle-orm';
 import * as schema from './drizzle/schema';
@@ -48,13 +44,21 @@ const getDefaultPlanId = async () => {
   return cachedDefaultPlanId;
 };
 
+const requireDefaultPlanId = async () => {
+  const planId = await getDefaultPlanId();
+  if (!planId) {
+    throw new APIError('INTERNAL_SERVER_ERROR', {
+      message: 'Plano padrao nao encontrado',
+    });
+  }
+  return planId;
+};
+
 const hasMasterUser = async () => {
   const [master] = await db
     .select({ id: users.id })
     .from(users)
-    .where(
-      and(eq(users.role, 'MASTER'), isNull(users.deletedAt)),
-    )
+    .where(and(eq(users.role, 'MASTER'), isNull(users.deletedAt)))
     .limit(1);
   return Boolean(master);
 };
@@ -80,7 +84,9 @@ const normalizeAuthBaseUrl = (baseUrl: string) => {
 
 const betterAuthBaseUrl = normalizeAuthBaseUrl(betterAuthUrl);
 const betterAuthOrigin = new URL(betterAuthUrl).origin;
-const trustedOrigins = [betterAuthOrigin, frontendUrl].filter(Boolean) as string[];
+const trustedOrigins = [betterAuthOrigin, frontendUrl].filter(
+  Boolean,
+) as string[];
 const socialProviders = {
   google: {
     clientId: googleClientId,
@@ -225,26 +231,29 @@ export const auth = betterAuth({
           const payload = user as { planId?: string | null; role?: string };
           const result: Record<string, unknown> = {};
           const masterExists = await hasMasterUser();
+          const hasPlanId =
+            typeof payload.planId === 'string' &&
+            payload.planId.trim().length > 0;
+          let planIdToApply: string | null = null;
 
           if (!masterExists) {
             result.role = 'MASTER';
-            result.planId = await ensureMasterPlanId(db);
-            return { data: result };
-          }
-
-          if (payload.role === 'MASTER') {
+            planIdToApply = await ensureMasterPlanId(db);
+          } else if (payload.role === 'MASTER') {
             throw new APIError('BAD_REQUEST', {
               message: 'Ja existe um master cadastrado',
             });
+          } else if (payload.role === 'ADMIN') {
+            planIdToApply = await ensureMasterPlanId(db);
+          } else if (!hasPlanId) {
+            planIdToApply = await requireDefaultPlanId();
           }
 
-          if (payload.role === 'ADMIN') {
-            result.planId = await ensureMasterPlanId(db);
-            return { data: result };
+          if (planIdToApply) {
+            result.planId = planIdToApply;
           }
 
-          if (!payload.planId) {
-            result.planId = await getDefaultPlanId();
+          if (Object.keys(result).length > 0) {
             return { data: result };
           }
 
