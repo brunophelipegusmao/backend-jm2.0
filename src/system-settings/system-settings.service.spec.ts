@@ -9,7 +9,14 @@ const databaseMock = {
   limit: jest.fn(() => databaseMock),
   insert: jest.fn(() => databaseMock),
   values: jest.fn(() => databaseMock),
-  returning: jest.fn(async () => [{ id: '1', maintenanceMode: false, createdAt: new Date(), updatedAt: new Date() }]),
+  returning: jest.fn(async () => [
+    {
+      id: '1',
+      maintenanceMode: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  ]),
   update: jest.fn(() => databaseMock),
   set: jest.fn(() => databaseMock),
   where: jest.fn(() => databaseMock),

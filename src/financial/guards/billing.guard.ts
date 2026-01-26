@@ -61,7 +61,11 @@ const addBusinessDays = (date: Date, days: number) => {
   return result;
 };
 
-const isOverdueBusinessDays = (dueDate: Date, days: number, now = new Date()) => {
+const isOverdueBusinessDays = (
+  dueDate: Date,
+  days: number,
+  now = new Date(),
+) => {
   const limit = addBusinessDays(startOfDay(dueDate), days);
   const today = startOfDay(now);
   return today > limit;

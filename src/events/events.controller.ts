@@ -31,7 +31,10 @@ import {
 } from '../common/utils/image-upload';
 import { EventsService } from './events.service';
 import { CreateEventDto, createEventSchema } from './dto/create-event.dto';
-import { EventRegistrationDto, eventRegistrationSchema } from './dto/event-registration.dto';
+import {
+  EventRegistrationDto,
+  eventRegistrationSchema,
+} from './dto/event-registration.dto';
 import {
   EventsQueryDto,
   PublicEventsQueryDto,
@@ -40,9 +43,7 @@ import {
 } from './dto/events-query.dto';
 import { UpdateEventDto, updateEventSchema } from './dto/update-event.dto';
 
-const normalizeQuery = (
-  query: Record<string, string | string[] | undefined>,
-) =>
+const normalizeQuery = (query: Record<string, string | string[] | undefined>) =>
   Object.fromEntries(
     Object.entries(query).map(([key, value]) => [
       key,
@@ -74,7 +75,10 @@ export class EventsController {
     return userId;
   }
 
-  private buildAuditContext(session: UserSession | undefined, request: Request) {
+  private buildAuditContext(
+    session: UserSession | undefined,
+    request: Request,
+  ) {
     const actorUserId = this.requireUserId(session);
     return {
       actorUserId,
@@ -192,7 +196,10 @@ export class EventsController {
     @Session() session: UserSession,
     @Req() request: Request,
   ) {
-    return this.eventsService.remove(id, this.buildAuditContext(session, request));
+    return this.eventsService.remove(
+      id,
+      this.buildAuditContext(session, request),
+    );
   }
 
   @UseGuards(AuthGuard, RolesGuard)
@@ -203,7 +210,10 @@ export class EventsController {
     @Session() session: UserSession,
     @Req() request: Request,
   ) {
-    return this.eventsService.restore(id, this.buildAuditContext(session, request));
+    return this.eventsService.restore(
+      id,
+      this.buildAuditContext(session, request),
+    );
   }
 
   @UseGuards(AuthGuard, RolesGuard)
@@ -214,7 +224,10 @@ export class EventsController {
     @Session() session: UserSession,
     @Req() request: Request,
   ) {
-    return this.eventsService.publish(id, this.buildAuditContext(session, request));
+    return this.eventsService.publish(
+      id,
+      this.buildAuditContext(session, request),
+    );
   }
 
   @UseGuards(AuthGuard, RolesGuard)

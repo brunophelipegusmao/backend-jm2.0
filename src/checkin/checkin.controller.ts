@@ -53,7 +53,8 @@ export class CheckinController {
     const userAgentHeader = request.headers['user-agent'];
     return this.checkinService.createForIdentifier(createCheckinDto, {
       ip: request.ip,
-      userAgent: typeof userAgentHeader === 'string' ? userAgentHeader : undefined,
+      userAgent:
+        typeof userAgentHeader === 'string' ? userAgentHeader : undefined,
     });
   }
 

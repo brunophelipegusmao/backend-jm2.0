@@ -218,6 +218,11 @@ export const auth = betterAuth({
         required: false,
         input: false,
       },
+      planId: {
+        type: 'string',
+        required: false,
+        input: true,
+      },
     },
   },
   emailAndPassword: {

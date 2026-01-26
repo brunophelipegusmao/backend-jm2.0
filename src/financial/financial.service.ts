@@ -1,15 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import {
-  and,
-  desc,
-  eq,
-  gte,
-  inArray,
-  isNull,
-  lte,
-  or,
-  sql,
-} from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../db/database.service';
 import { plans } from '../drizzle/schema/plans';
@@ -174,7 +164,7 @@ export class FinancialService {
       (!plan.promoEndsAt || plan.promoEndsAt > startsAt);
     return {
       monthlyAmountCentsSnapshot: promoValid
-        ? plan.promoPriceCents ?? plan.priceCents
+        ? (plan.promoPriceCents ?? plan.priceCents)
         : plan.priceCents,
       planPriceCentsSnapshot: plan.priceCents,
       planPromoPriceCentsSnapshot: plan.promoPriceCents ?? null,
@@ -198,10 +188,7 @@ export class FinancialService {
     }
 
     if (subscription.customDueDay) {
-      const day = Math.min(
-        Math.max(subscription.customDueDay, 1),
-        daysInMonth,
-      );
+      const day = Math.min(Math.max(subscription.customDueDay, 1), daysInMonth);
       return new Date(competence.getFullYear(), competence.getMonth(), day);
     }
 
@@ -305,7 +292,10 @@ export class FinancialService {
     }
   }
 
-  async createSubscription(payload: CreateSubscriptionDto, audit?: AuditContext) {
+  async createSubscription(
+    payload: CreateSubscriptionDto,
+    audit?: AuditContext,
+  ) {
     const startsAt = this.parseDateTime(payload.startsAt) ?? new Date();
     const dueDateMode = payload.dueDateMode ?? 'fixed_day';
     const billingDay = payload.billingDay ?? null;
@@ -317,7 +307,9 @@ export class FinancialService {
     }
 
     if (dueDateMode === 'custom_date' && !customDueDay && !customDueDate) {
-      throw new BadRequestException('customDueDay ou customDueDate obrigatorio');
+      throw new BadRequestException(
+        'customDueDay ou customDueDate obrigatorio',
+      );
     }
 
     await this.ensureUserActive(payload.userId);
@@ -384,9 +376,7 @@ export class FinancialService {
     const planSnapshot = this.resolvePlanMonthlyAmount(plan, startsAt);
     const endsAt =
       plan.durationDays && plan.durationDays > 0
-        ? new Date(
-            startsAt.getTime() + plan.durationDays * 24 * 60 * 60 * 1000,
-          )
+        ? new Date(startsAt.getTime() + plan.durationDays * 24 * 60 * 60 * 1000)
         : null;
     const notes = payload.notes?.trim() ?? null;
 
@@ -501,7 +491,11 @@ export class FinancialService {
       )
       .limit(1);
 
-    if (!subscription || subscription.status !== 'active' || !subscription.endsAt) {
+    if (
+      !subscription ||
+      subscription.status !== 'active' ||
+      !subscription.endsAt
+    ) {
       return null;
     }
 
@@ -547,7 +541,9 @@ export class FinancialService {
     const [current] = await this.databaseService.database
       .select()
       .from(userSubscriptions)
-      .where(and(eq(userSubscriptions.id, id), isNull(userSubscriptions.deletedAt)))
+      .where(
+        and(eq(userSubscriptions.id, id), isNull(userSubscriptions.deletedAt)),
+      )
       .limit(1);
 
     if (!current) {
@@ -621,7 +617,9 @@ export class FinancialService {
     }
 
     if (payload.customDueDate !== undefined) {
-      updates.customDueDate = this.toDateOnlyString(payload.customDueDate ?? null);
+      updates.customDueDate = this.toDateOnlyString(
+        payload.customDueDate ?? null,
+      );
     }
 
     if (payload.prorationMode !== undefined) {
@@ -640,7 +638,9 @@ export class FinancialService {
       throw new BadRequestException('billingDay obrigatorio');
     }
     if (dueDateMode === 'custom_date' && !customDueDay && !customDueDate) {
-      throw new BadRequestException('customDueDay ou customDueDate obrigatorio');
+      throw new BadRequestException(
+        'customDueDay ou customDueDate obrigatorio',
+      );
     }
 
     if (Object.keys(updates).length === 0) {
@@ -674,7 +674,10 @@ export class FinancialService {
     return updated ?? current;
   }
 
-  findSubscriptions(filters?: { userId?: string; status?: SubscriptionStatus }) {
+  findSubscriptions(filters?: {
+    userId?: string;
+    status?: SubscriptionStatus;
+  }) {
     const whereFilters = [isNull(userSubscriptions.deletedAt)];
 
     if (filters?.userId) {
@@ -698,7 +701,9 @@ export class FinancialService {
     const [subscription] = await this.databaseService.database
       .select()
       .from(userSubscriptions)
-      .where(and(eq(userSubscriptions.id, id), isNull(userSubscriptions.deletedAt)))
+      .where(
+        and(eq(userSubscriptions.id, id), isNull(userSubscriptions.deletedAt)),
+      )
       .limit(1);
 
     return subscription ?? null;
@@ -725,7 +730,8 @@ export class FinancialService {
         billingDay: userSubscriptions.billingDay,
         customDueDay: userSubscriptions.customDueDay,
         customDueDate: userSubscriptions.customDueDate,
-        monthlyAmountCentsSnapshot: userSubscriptions.monthlyAmountCentsSnapshot,
+        monthlyAmountCentsSnapshot:
+          userSubscriptions.monthlyAmountCentsSnapshot,
         prorationMode: userSubscriptions.prorationMode,
       })
       .from(userSubscriptions)
@@ -886,7 +892,10 @@ export class FinancialService {
       .select()
       .from(financialReceivables)
       .where(
-        and(eq(financialReceivables.id, id), isNull(financialReceivables.deletedAt)),
+        and(
+          eq(financialReceivables.id, id),
+          isNull(financialReceivables.deletedAt),
+        ),
       )
       .limit(1);
 
@@ -909,7 +918,10 @@ export class FinancialService {
       throw new BadRequestException('Recebivel nao encontrado');
     }
 
-    if (receivable.status === 'cancelled' || receivable.status === 'renegotiated') {
+    if (
+      receivable.status === 'cancelled' ||
+      receivable.status === 'renegotiated'
+    ) {
       throw new BadRequestException('Recebivel indisponivel');
     }
 
@@ -933,7 +945,10 @@ export class FinancialService {
     }
 
     const totals = await this.sumPayments(receivable.id);
-    const statusUpdate = this.resolveReceivablePaymentStatus(receivable, totals);
+    const statusUpdate = this.resolveReceivablePaymentStatus(
+      receivable,
+      totals,
+    );
 
     const [updatedReceivable] = await this.databaseService.database
       .update(financialReceivables)
@@ -976,7 +991,9 @@ export class FinancialService {
     const [payment] = await this.databaseService.database
       .select()
       .from(financialPayments)
-      .where(and(eq(financialPayments.id, id), isNull(financialPayments.deletedAt)))
+      .where(
+        and(eq(financialPayments.id, id), isNull(financialPayments.deletedAt)),
+      )
       .limit(1);
 
     if (!payment) {
@@ -1012,7 +1029,10 @@ export class FinancialService {
     }
 
     const totals = await this.sumPayments(receivable.id);
-    const statusUpdate = this.resolveReceivablePaymentStatus(receivable, totals);
+    const statusUpdate = this.resolveReceivablePaymentStatus(
+      receivable,
+      totals,
+    );
 
     const [updatedReceivable] = await this.databaseService.database
       .update(financialReceivables)
@@ -1076,7 +1096,12 @@ export class FinancialService {
     const [existing] = await this.databaseService.database
       .select({ id: expenseTemplates.id })
       .from(expenseTemplates)
-      .where(and(eq(expenseTemplates.name, name), isNull(expenseTemplates.deletedAt)))
+      .where(
+        and(
+          eq(expenseTemplates.name, name),
+          isNull(expenseTemplates.deletedAt),
+        ),
+      )
       .limit(1);
 
     if (existing) {
@@ -1120,7 +1145,9 @@ export class FinancialService {
     const [current] = await this.databaseService.database
       .select()
       .from(expenseTemplates)
-      .where(and(eq(expenseTemplates.id, id), isNull(expenseTemplates.deletedAt)))
+      .where(
+        and(eq(expenseTemplates.id, id), isNull(expenseTemplates.deletedAt)),
+      )
       .limit(1);
 
     if (!current) {
@@ -1179,7 +1206,12 @@ export class FinancialService {
     const templates = await this.databaseService.database
       .select()
       .from(expenseTemplates)
-      .where(and(eq(expenseTemplates.active, true), isNull(expenseTemplates.deletedAt)));
+      .where(
+        and(
+          eq(expenseTemplates.active, true),
+          isNull(expenseTemplates.deletedAt),
+        ),
+      );
 
     if (templates.length === 0) {
       return { competence, created: [], skipped: 0 };
@@ -1339,11 +1371,17 @@ export class FinancialService {
     return expense;
   }
 
-  async updateExpense(id: string, payload: UpdateExpenseDto, audit?: AuditContext) {
+  async updateExpense(
+    id: string,
+    payload: UpdateExpenseDto,
+    audit?: AuditContext,
+  ) {
     const [current] = await this.databaseService.database
       .select()
       .from(financialExpenses)
-      .where(and(eq(financialExpenses.id, id), isNull(financialExpenses.deletedAt)))
+      .where(
+        and(eq(financialExpenses.id, id), isNull(financialExpenses.deletedAt)),
+      )
       .limit(1);
 
     if (!current) {

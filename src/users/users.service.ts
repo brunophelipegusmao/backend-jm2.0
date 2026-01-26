@@ -207,9 +207,7 @@ export class UsersService {
       const [existingMaster] = await this.databaseService.database
         .select({ id: users.id })
         .from(users)
-        .where(
-          and(eq(users.role, 'MASTER'), isNull(users.deletedAt)),
-        )
+        .where(and(eq(users.role, 'MASTER'), isNull(users.deletedAt)))
         .limit(1);
 
       if (existingMaster) {
@@ -333,7 +331,9 @@ export class UsersService {
     const [existingCpf] = await this.databaseService.database
       .select({ id: users.id })
       .from(users)
-      .where(and(eq(users.cpf, completeProfileDto.cpf), isNull(users.deletedAt)))
+      .where(
+        and(eq(users.cpf, completeProfileDto.cpf), isNull(users.deletedAt)),
+      )
       .limit(1);
 
     if (existingCpf && existingCpf.id !== session.user.id) {
@@ -391,7 +391,11 @@ export class UsersService {
       })
       .from(users)
       .where(
-        and(eq(users.id, userId), eq(users.role, 'GUEST'), isNull(users.deletedAt)),
+        and(
+          eq(users.id, userId),
+          eq(users.role, 'GUEST'),
+          isNull(users.deletedAt),
+        ),
       )
       .limit(1);
 
@@ -428,7 +432,13 @@ export class UsersService {
     const [updated] = await this.databaseService.database
       .update(users)
       .set(updateData)
-      .where(and(eq(users.id, userId), eq(users.role, 'GUEST'), isNull(users.deletedAt)))
+      .where(
+        and(
+          eq(users.id, userId),
+          eq(users.role, 'GUEST'),
+          isNull(users.deletedAt),
+        ),
+      )
       .returning({
         id: users.id,
         email: users.email,

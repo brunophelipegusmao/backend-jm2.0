@@ -10,22 +10,24 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import {
-  AuthGuard,
-  Session,
-  UserSession,
-} from '@thallesp/nestjs-better-auth';
+import { AuthGuard, Session, UserSession } from '@thallesp/nestjs-better-auth';
 import type { Request } from 'express';
 import { z } from 'zod';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
-import { CreateExpenseDto, createExpenseSchema } from './dto/create-expense.dto';
+import {
+  CreateExpenseDto,
+  createExpenseSchema,
+} from './dto/create-expense.dto';
 import {
   CreateExpenseTemplateDto,
   createExpenseTemplateSchema,
 } from './dto/create-expense-template.dto';
-import { CreatePaymentDto, createPaymentSchema } from './dto/create-payment.dto';
+import {
+  CreatePaymentDto,
+  createPaymentSchema,
+} from './dto/create-payment.dto';
 import {
   CreateSubscriptionDto,
   createSubscriptionSchema,
@@ -45,7 +47,10 @@ import {
   GenerateReceivablesDto,
   generateReceivablesSchema,
 } from './dto/generate-receivables.dto';
-import { UpdateExpenseDto, updateExpenseSchema } from './dto/update-expense.dto';
+import {
+  UpdateExpenseDto,
+  updateExpenseSchema,
+} from './dto/update-expense.dto';
 import {
   UpdateExpenseTemplateDto,
   updateExpenseTemplateSchema,
@@ -104,9 +109,7 @@ const dashboardQuerySchema = z.object({
   competence: dateString.optional(),
 });
 
-const normalizeQuery = (
-  query: Record<string, string | string[] | undefined>,
-) =>
+const normalizeQuery = (query: Record<string, string | string[] | undefined>) =>
   Object.fromEntries(
     Object.entries(query).map(([key, value]) => [
       key,
@@ -140,7 +143,10 @@ export class FinancialController {
     return userId;
   }
 
-  private buildAuditContext(session: UserSession | undefined, request: Request) {
+  private buildAuditContext(
+    session: UserSession | undefined,
+    request: Request,
+  ) {
     const actorUserId = this.requireUserId(session);
     return {
       actorUserId,
@@ -163,7 +169,9 @@ export class FinancialController {
   }
 
   @Get('subscriptions')
-  listSubscriptions(@Query() query: Record<string, string | string[] | undefined>) {
+  listSubscriptions(
+    @Query() query: Record<string, string | string[] | undefined>,
+  ) {
     const filters = parseQuery(subscriptionQuerySchema, query);
     return this.financialService.findSubscriptions(filters);
   }
@@ -202,7 +210,9 @@ export class FinancialController {
   }
 
   @Get('receivables')
-  listReceivables(@Query() query: Record<string, string | string[] | undefined>) {
+  listReceivables(
+    @Query() query: Record<string, string | string[] | undefined>,
+  ) {
     const filters = parseQuery(receivableQuerySchema, query);
     return this.financialService.listReceivables(filters);
   }

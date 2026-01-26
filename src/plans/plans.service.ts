@@ -82,14 +82,14 @@ export class PlansService {
     const promoPriceCents =
       payload.promoPriceCents !== undefined
         ? payload.promoPriceCents
-        : current?.promoPriceCents ?? null;
+        : (current?.promoPriceCents ?? null);
 
     const promoActive =
       payload.promoActive !== undefined
         ? payload.promoActive
         : payload.promoPriceCents !== undefined
           ? payload.promoPriceCents !== null
-          : current?.promoActive ?? false;
+          : (current?.promoActive ?? false);
 
     const promoEndsAt =
       payload.promoEndsAt !== undefined
@@ -144,7 +144,7 @@ export class PlansService {
         active: createPlanDto.active ?? true,
         durationDays:
           createPlanDto.durationDays !== undefined
-            ? createPlanDto.durationDays ?? null
+            ? (createPlanDto.durationDays ?? null)
             : null,
       })
       .returning();

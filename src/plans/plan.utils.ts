@@ -33,7 +33,11 @@ export async function findActivePlanIdBySlug(
     .select({ id: plans.id })
     .from(plans)
     .where(
-      and(eq(plans.slug, slug), eq(plans.active, true), isNull(plans.deletedAt)),
+      and(
+        eq(plans.slug, slug),
+        eq(plans.active, true),
+        isNull(plans.deletedAt),
+      ),
     )
     .limit(1);
 

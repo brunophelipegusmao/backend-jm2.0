@@ -33,7 +33,10 @@ export const auditLogs = pgTable(
   (table) => ({
     actorIdx: index('tb_audit_logs_actor_idx').on(table.actorUserId),
     targetIdx: index('tb_audit_logs_target_idx').on(table.targetUserId),
-    entityIdx: index('tb_audit_logs_entity_idx').on(table.entity, table.entityId),
+    entityIdx: index('tb_audit_logs_entity_idx').on(
+      table.entity,
+      table.entityId,
+    ),
   }),
 );
 

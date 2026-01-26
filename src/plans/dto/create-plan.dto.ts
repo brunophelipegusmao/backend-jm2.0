@@ -16,12 +16,7 @@ export const createPlanSchema = z.object({
   promoEndsAt: dateString.optional().nullable(),
   popular: z.boolean().optional(),
   active: z.boolean().optional(),
-  durationDays: z
-    .coerce.number()
-    .int()
-    .positive()
-    .optional()
-    .nullable(),
+  durationDays: z.coerce.number().int().positive().optional().nullable(),
 });
 
 export type CreatePlanDto = z.infer<typeof createPlanSchema>;

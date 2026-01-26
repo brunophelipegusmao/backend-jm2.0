@@ -11,11 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import {
-  AuthGuard,
-  Session,
-  UserSession,
-} from '@thallesp/nestjs-better-auth';
+import { AuthGuard, Session, UserSession } from '@thallesp/nestjs-better-auth';
 import type { Request } from 'express';
 import {
   assertValidImageUpload,
@@ -27,10 +23,7 @@ import {
   CompleteProfileDto,
   completeProfileSchema,
 } from './dto/complete-profile.dto';
-import {
-  ConvertGuestDto,
-  convertGuestSchema,
-} from './dto/convert-guest.dto';
+import { ConvertGuestDto, convertGuestSchema } from './dto/convert-guest.dto';
 
 @Controller('users')
 @UseGuards(AuthGuard)
@@ -47,7 +40,9 @@ export class UsersController {
 
   @Get('me')
   getMe(@Session() session: UserSession) {
-    return this.usersService.getMe({ user: { id: this.requireUserId(session) } });
+    return this.usersService.getMe({
+      user: { id: this.requireUserId(session) },
+    });
   }
 
   @Get('me/status')
@@ -84,7 +79,8 @@ export class UsersController {
       {
         actorUserId: actorId,
         ip: request.ip,
-        userAgent: typeof userAgentHeader === 'string' ? userAgentHeader : undefined,
+        userAgent:
+          typeof userAgentHeader === 'string' ? userAgentHeader : undefined,
       },
     );
   }
@@ -104,7 +100,8 @@ export class UsersController {
     return this.usersService.updateAvatar(userId, validatedFile, {
       actorUserId: userId,
       ip: request.ip,
-      userAgent: typeof userAgentHeader === 'string' ? userAgentHeader : undefined,
+      userAgent:
+        typeof userAgentHeader === 'string' ? userAgentHeader : undefined,
     });
   }
 }

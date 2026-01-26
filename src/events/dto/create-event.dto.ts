@@ -26,7 +26,11 @@ const baseEventSchema = z.object({
 
 export const createEventSchema = baseEventSchema.superRefine((data, ctx) => {
   const accessMode = data.accessMode ?? 'open';
-  if (accessMode === 'open' && data.capacity !== undefined && data.capacity !== null) {
+  if (
+    accessMode === 'open' &&
+    data.capacity !== undefined &&
+    data.capacity !== null
+  ) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['capacity'],

@@ -85,7 +85,9 @@ export class CheckinService {
     return digits;
   }
 
-  private assertUserCanCheckin(user?: { role: string; active: boolean } | null) {
+  private assertUserCanCheckin(
+    user?: { role: string; active: boolean } | null,
+  ) {
     if (!user) {
       throw new BadRequestException('Usuario nao encontrado');
     }
@@ -109,10 +111,10 @@ export class CheckinService {
     this.assertUserCanCheckin(user);
   }
 
-  private async ensureUserCanCheckinByIdentifier({
-    email,
-    cpf,
-  }: CreateIdentifierCheckinDto, context?: Pick<CheckinAuditContext, 'ip'>) {
+  private async ensureUserCanCheckinByIdentifier(
+    { email, cpf }: CreateIdentifierCheckinDto,
+    context?: Pick<CheckinAuditContext, 'ip'>,
+  ) {
     const normalizedEmail = this.normalizeEmail(email);
     const normalizedCpf = this.normalizeCpf(cpf);
 
@@ -155,7 +157,7 @@ export class CheckinService {
         : 'email'
       : 'cpf';
 
-    return { user: user!, identifierType };
+    return { user: user, identifierType };
   }
 
   private async ensureNotBlocked(userId: string, checkedInAt: Date) {
@@ -168,10 +170,7 @@ export class CheckinService {
           isNull(checkinBlocks.deletedAt),
           lte(checkinBlocks.startsAt, checkedInAt),
           gt(checkinBlocks.endsAt, checkedInAt),
-          or(
-            eq(checkinBlocks.userId, userId),
-            isNull(checkinBlocks.userId),
-          ),
+          or(eq(checkinBlocks.userId, userId), isNull(checkinBlocks.userId)),
         ),
       )
       .limit(1);
@@ -206,10 +205,8 @@ export class CheckinService {
     const checkedInAt =
       this.parseCheckedInAt(createCheckinDto.checkedInAt) ?? new Date();
 
-    const { user, identifierType } = await this.ensureUserCanCheckinByIdentifier(
-      createCheckinDto,
-      context,
-    );
+    const { user, identifierType } =
+      await this.ensureUserCanCheckinByIdentifier(createCheckinDto, context);
     await ensureUserBillingStatus(this.databaseService.database, user.id);
     await this.ensureNotBlocked(user.id, checkedInAt);
 

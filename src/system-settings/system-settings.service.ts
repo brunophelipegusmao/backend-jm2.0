@@ -54,7 +54,7 @@ const DEFAULT_OPERATING_HOURS: DaySchedule[] = [
 
 const DEFAULT_MAINTENANCE_ROUTES = ['/contacts', '/checkin'];
 
-const hasMasterRole = (role?: string | string[] | undefined) => {
+const hasMasterRole = (role?: string | string[]) => {
   if (typeof role === 'string') {
     return role === 'MASTER';
   }
@@ -64,7 +64,7 @@ const hasMasterRole = (role?: string | string[] | undefined) => {
   return false;
 };
 
-const hasAdminRole = (role?: string | string[] | undefined) => {
+const hasAdminRole = (role?: string | string[]) => {
   if (typeof role === 'string') {
     return role === 'ADMIN';
   }
@@ -90,12 +90,12 @@ const ensureOperatingHours = (value: unknown): DaySchedule[] => {
       if (
         typeof entry !== 'object' ||
         entry === null ||
-        typeof (entry as any).day !== 'string' ||
-        !Array.isArray((entry as any).segments)
+        typeof entry.day !== 'string' ||
+        !Array.isArray(entry.segments)
       ) {
         return null;
       }
-      const segments = (entry as any).segments
+      const segments = entry.segments
         .map((segment: unknown) => {
           if (
             typeof segment === 'object' &&
@@ -112,7 +112,7 @@ const ensureOperatingHours = (value: unknown): DaySchedule[] => {
         return null;
       }
       return {
-        day: (entry as any).day,
+        day: entry.day,
         segments,
       };
     })
@@ -120,11 +120,7 @@ const ensureOperatingHours = (value: unknown): DaySchedule[] => {
 };
 
 const ensureSocialLinks = (value: unknown): Record<string, string | null> => {
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    Array.isArray(value)
-  ) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return {};
   }
   const record: Record<string, string | null> = {};
@@ -184,11 +180,15 @@ export class SystemSettingsService {
     dto: UpdateSystemSettingsDto,
   ): Promise<SystemSettingsResponse> {
     if (!hasMasterRole(sessionRole) && !hasAdminRole(sessionRole)) {
-      throw new ForbiddenException('Somente MASTER ou ADMIN podem editar as configuracoes');
+      throw new ForbiddenException(
+        'Somente MASTER ou ADMIN podem editar as configuracoes',
+      );
     }
 
     if (dto.maintenanceMode !== undefined && !hasMasterRole(sessionRole)) {
-      throw new ForbiddenException('Somente MASTER pode alterar o modo manutenção');
+      throw new ForbiddenException(
+        'Somente MASTER pode alterar o modo manutenção',
+      );
     }
 
     const existing = await this.ensureSettings();
@@ -288,7 +288,8 @@ export class SystemSettingsService {
 
   private format(row: SystemSettingsRow): SystemSettingsResponse {
     const maintenanceRoutes =
-      ensureStringArray(row.maintenanceAllowedRoutes) ?? DEFAULT_MAINTENANCE_ROUTES;
+      ensureStringArray(row.maintenanceAllowedRoutes) ??
+      DEFAULT_MAINTENANCE_ROUTES;
     const hours = ensureOperatingHours(row.operatingHours);
     return {
       id: row.id,
@@ -343,8 +344,14 @@ export class SystemSettingsService {
         popups.push({
           type: entry.type,
           imageUrl: entry.imageUrl,
-          link: typeof (entry as any).link === 'string' ? (entry as any).link : undefined,
-          active: typeof (entry as any).active === 'boolean' ? (entry as any).active : undefined,
+          link:
+            typeof (entry as any).link === 'string'
+              ? (entry as any).link
+              : undefined,
+          active:
+            typeof (entry as any).active === 'boolean'
+              ? (entry as any).active
+              : undefined,
         });
       }
     }
@@ -370,7 +377,9 @@ export class SystemSettingsService {
       throw new BadRequestException('Imagens devem vir do Cloudinary');
     }
     if (!parsed.pathname.includes(expectedSegment)) {
-      throw new BadRequestException('Imagens devem pertencer ao cloud name configurado');
+      throw new BadRequestException(
+        'Imagens devem pertencer ao cloud name configurado',
+      );
     }
   }
 }

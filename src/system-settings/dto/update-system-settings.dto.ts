@@ -64,4 +64,6 @@ export const updateSystemSettingsSchema = z.object({
   promoPopups: z.array(popupSchema).max(3).optional(),
 });
 
-export type UpdateSystemSettingsDto = z.infer<typeof updateSystemSettingsSchema>;
+export type UpdateSystemSettingsDto = z.infer<
+  typeof updateSystemSettingsSchema
+>;

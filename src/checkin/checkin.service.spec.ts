@@ -13,7 +13,10 @@ describe('CheckinService', () => {
         CheckinService,
         { provide: DatabaseService, useValue: { database: {} } },
         { provide: AuditService, useValue: { log: jest.fn() } },
-        { provide: AnonymousCheckinRateLimiter, useValue: { assertWithinLimit: jest.fn() } },
+        {
+          provide: AnonymousCheckinRateLimiter,
+          useValue: { assertWithinLimit: jest.fn() },
+        },
       ],
     }).compile();
 

@@ -10,11 +10,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import {
-  AuthGuard,
-  Session,
-  UserSession,
-} from '@thallesp/nestjs-better-auth';
+import { AuthGuard, Session, UserSession } from '@thallesp/nestjs-better-auth';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { HealthService } from './health.service';
 import { CreateHealthDto, createHealthSchema } from './dto/create-health.dto';

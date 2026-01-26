@@ -71,7 +71,10 @@ export class HealthService {
     return age;
   }
 
-  private bmiCategoryForProfile(birthDate?: string | Date | null, bmi?: string | null) {
+  private bmiCategoryForProfile(
+    birthDate?: string | Date | null,
+    bmi?: string | null,
+  ) {
     if (!birthDate || !bmi) {
       return undefined;
     }
@@ -86,11 +89,16 @@ export class HealthService {
     return bmiCategoryFromAdult(numeric);
   }
 
-  private attachBmiCategory<T extends { birthDate?: any; bmi?: any }>(profile: T | null) {
+  private attachBmiCategory<T extends { birthDate?: any; bmi?: any }>(
+    profile: T | null,
+  ) {
     if (!profile) {
       return profile;
     }
-    const bmiCategory = this.bmiCategoryForProfile(profile.birthDate, profile.bmi);
+    const bmiCategory = this.bmiCategoryForProfile(
+      profile.birthDate,
+      profile.bmi,
+    );
     return { ...profile, bmiCategory };
   }
 
@@ -287,7 +295,9 @@ export class HealthService {
 
     const updated = await this.upsertForUser(userId, createHealthDto);
 
-    const auditAfter = this.stripBmiCategory(updated as Record<string, any> | null);
+    const auditAfter = this.stripBmiCategory(
+      updated as Record<string, any> | null,
+    );
     await this.auditService.log({
       actorUserId: actor.actorUserId,
       targetUserId: userId,
@@ -360,7 +370,9 @@ export class HealthService {
       .limit(1);
 
     const updated = await this.updateForUser(userId, updateHealthDto);
-    const auditAfter = this.stripBmiCategory(updated as Record<string, any> | null);
+    const auditAfter = this.stripBmiCategory(
+      updated as Record<string, any> | null,
+    );
 
     await this.auditService.log({
       actorUserId: actor.actorUserId,

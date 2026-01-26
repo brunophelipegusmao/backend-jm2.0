@@ -13,7 +13,10 @@ import type { Request } from 'express';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
-import { UpdateUserAdminDto, updateUserAdminSchema } from './dto/update-user-admin.dto';
+import {
+  UpdateUserAdminDto,
+  updateUserAdminSchema,
+} from './dto/update-user-admin.dto';
 import { UsersService } from './users.service';
 
 @Controller('admin/users')

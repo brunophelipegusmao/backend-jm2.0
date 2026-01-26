@@ -39,10 +39,8 @@ type EventRow = typeof events.$inferSelect;
 type RegistrationRow = typeof eventRegistrations.$inferSelect;
 
 const SLUG_UNIQUE_CONSTRAINT = 'tb_events_slug_unique';
-const REG_USER_UNIQUE_CONSTRAINT =
-  'tb_event_registrations_event_user_unique';
-const REG_EMAIL_UNIQUE_CONSTRAINT =
-  'tb_event_registrations_event_email_unique';
+const REG_USER_UNIQUE_CONSTRAINT = 'tb_event_registrations_event_user_unique';
+const REG_EMAIL_UNIQUE_CONSTRAINT = 'tb_event_registrations_event_email_unique';
 
 @Injectable()
 export class EventsService {
@@ -123,7 +121,11 @@ export class EventsService {
     if (!error || typeof error !== 'object') {
       return false;
     }
-    const typed = error as { code?: string; constraint?: string; message?: string };
+    const typed = error as {
+      code?: string;
+      constraint?: string;
+      message?: string;
+    };
     if (typed.code !== '23505') {
       return false;
     }
@@ -284,11 +286,7 @@ export class EventsService {
     return event;
   }
 
-  async update(
-    id: string,
-    payload: UpdateEventDto,
-    audit?: AuditContext,
-  ) {
+  async update(id: string, payload: UpdateEventDto, audit?: AuditContext) {
     const [current] = await this.databaseService.database
       .select()
       .from(events)
@@ -434,9 +432,7 @@ export class EventsService {
             const [existing] = await tx
               .select({ id: events.id })
               .from(events)
-              .where(
-                and(eq(events.slug, candidate), isNull(events.deletedAt)),
-              )
+              .where(and(eq(events.slug, candidate), isNull(events.deletedAt)))
               .limit(1);
             if (!existing) {
               slug = candidate;
@@ -491,7 +487,11 @@ export class EventsService {
 
     const [published] = await this.databaseService.database
       .update(events)
-      .set({ isPublished: true, publishedAt: new Date(), updatedAt: new Date() })
+      .set({
+        isPublished: true,
+        publishedAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(and(eq(events.id, id), isNull(events.deletedAt)))
       .returning();
 
@@ -639,92 +639,94 @@ export class EventsService {
     registrationId: string,
     audit?: AuditContext,
   ) {
-    const result = await this.databaseService.database.transaction(async (tx) => {
-      const [event] = await tx
-        .select({
-          id: events.id,
-          accessMode: events.accessMode,
-          capacity: events.capacity,
-          createdByUserId: events.createdByUserId,
-        })
-        .from(events)
-        .where(and(eq(events.id, eventId), isNull(events.deletedAt)))
-        .limit(1);
-
-      if (!event) {
-        throw new NotFoundException('Evento nao encontrado');
-      }
-
-      const [registration] = await tx
-        .select()
-        .from(eventRegistrations)
-        .where(
-          and(
-            eq(eventRegistrations.id, registrationId),
-            eq(eventRegistrations.eventId, eventId),
-            isNull(eventRegistrations.deletedAt),
-          ),
-        )
-        .limit(1);
-
-      if (!registration) {
-        throw new NotFoundException('Inscricao nao encontrada');
-      }
-
-      const now = new Date();
-      const before = registration;
-      let cancelled = registration;
-      if (registration.status !== 'cancelled') {
-        const [updated] = await tx
-          .update(eventRegistrations)
-          .set({
-            status: 'cancelled',
-            cancelledAt: now,
+    const result = await this.databaseService.database.transaction(
+      async (tx) => {
+        const [event] = await tx
+          .select({
+            id: events.id,
+            accessMode: events.accessMode,
+            capacity: events.capacity,
+            createdByUserId: events.createdByUserId,
           })
-          .where(eq(eventRegistrations.id, registrationId))
-          .returning();
-        cancelled = updated ?? registration;
-      }
+          .from(events)
+          .where(and(eq(events.id, eventId), isNull(events.deletedAt)))
+          .limit(1);
 
-      let promoted: RegistrationRow | null = null;
-      if (
-        registration.status === 'confirmed' &&
-        event.accessMode === 'registered_only' &&
-        event.capacity !== null
-      ) {
-        const [waitlisted] = await tx
+        if (!event) {
+          throw new NotFoundException('Evento nao encontrado');
+        }
+
+        const [registration] = await tx
           .select()
           .from(eventRegistrations)
           .where(
             and(
+              eq(eventRegistrations.id, registrationId),
               eq(eventRegistrations.eventId, eventId),
-              eq(eventRegistrations.status, 'waitlisted'),
               isNull(eventRegistrations.deletedAt),
             ),
           )
-          .orderBy(asc(eventRegistrations.createdAt))
           .limit(1);
 
-        if (waitlisted) {
-          const [promotedRow] = await tx
+        if (!registration) {
+          throw new NotFoundException('Inscricao nao encontrada');
+        }
+
+        const now = new Date();
+        const before = registration;
+        let cancelled = registration;
+        if (registration.status !== 'cancelled') {
+          const [updated] = await tx
             .update(eventRegistrations)
             .set({
-              status: 'confirmed',
-              confirmedAt: now,
+              status: 'cancelled',
+              cancelledAt: now,
             })
-            .where(eq(eventRegistrations.id, waitlisted.id))
+            .where(eq(eventRegistrations.id, registrationId))
             .returning();
-          promoted = promotedRow ?? waitlisted;
+          cancelled = updated ?? registration;
         }
-      }
 
-      return {
-        event,
-        before,
-        cancelled,
-        promoted,
-      };
-    });
+        let promoted: RegistrationRow | null = null;
+        if (
+          registration.status === 'confirmed' &&
+          event.accessMode === 'registered_only' &&
+          event.capacity !== null
+        ) {
+          const [waitlisted] = await tx
+            .select()
+            .from(eventRegistrations)
+            .where(
+              and(
+                eq(eventRegistrations.eventId, eventId),
+                eq(eventRegistrations.status, 'waitlisted'),
+                isNull(eventRegistrations.deletedAt),
+              ),
+            )
+            .orderBy(asc(eventRegistrations.createdAt))
+            .limit(1);
+
+          if (waitlisted) {
+            const [promotedRow] = await tx
+              .update(eventRegistrations)
+              .set({
+                status: 'confirmed',
+                confirmedAt: now,
+              })
+              .where(eq(eventRegistrations.id, waitlisted.id))
+              .returning();
+            promoted = promotedRow ?? waitlisted;
+          }
+        }
+
+        return {
+          event,
+          before,
+          cancelled,
+          promoted,
+        };
+      },
+    );
 
     await this.auditService.log({
       actorUserId: audit?.actorUserId,
@@ -962,8 +964,8 @@ export class EventsService {
             .values({
               eventId: event.id,
               userId: userId ?? null,
-              name: userId ? null : normalizedName ?? null,
-              email: userId ? null : normalizedEmail ?? null,
+              name: userId ? null : (normalizedName ?? null),
+              email: userId ? null : (normalizedEmail ?? null),
               status,
               confirmedAt,
             })
