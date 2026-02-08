@@ -18,24 +18,72 @@ const baseEventSchema = z.object({
   date: dateString,
   time: timeString,
   endTime: timeString.optional().nullable(),
-  location: z.string().trim().max(160).optional().nullable(),
+  location: z.string().trim().min(3).max(160),
   hideLocation: z.boolean().optional(),
-  accessMode: z.enum(eventAccessModeValues).optional(),
+  accessMode: z.enum(eventAccessModeValues),
   capacity: z.number().int().min(1).optional().nullable(),
+  allowGuests: z.boolean(),
+  requiresConfirmation: z.boolean(),
+  isPaid: z.boolean(),
+  priceCents: z.number().int().min(1).optional().nullable(),
+  paymentMethod: z.string().trim().min(2).max(60).optional().nullable(),
 });
 
 export const createEventSchema = baseEventSchema.superRefine((data, ctx) => {
-  const accessMode = data.accessMode ?? 'open';
-  if (
-    accessMode === 'open' &&
-    data.capacity !== undefined &&
-    data.capacity !== null
-  ) {
+  const accessMode = data.accessMode;
+  if (accessMode === 'open') {
+    if (data.capacity !== undefined && data.capacity !== null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['capacity'],
+        message: 'Capacidade deve ser nula para eventos abertos',
+      });
+    }
+  } else if (data.capacity === undefined || data.capacity === null) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['capacity'],
-      message: 'Capacidade deve ser nula para eventos abertos',
+      message: 'Capacidade é obrigatoria para eventos com inscricao',
     });
+  }
+
+  if (data.isPaid) {
+    if (!data.priceCents || data.priceCents < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['priceCents'],
+        message: 'Valor do evento é obrigatório',
+      });
+    }
+    if (!data.paymentMethod || !data.paymentMethod.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['paymentMethod'],
+        message: 'Forma de pagamento é obrigatória',
+      });
+    }
+    if (!data.requiresConfirmation) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['requiresConfirmation'],
+        message: 'Eventos pagos exigem confirmacao de presenca',
+      });
+    }
+  } else {
+    if (data.priceCents !== undefined && data.priceCents !== null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['priceCents'],
+        message: 'Valor só deve ser informado em eventos pagos',
+      });
+    }
+    if (data.paymentMethod !== undefined && data.paymentMethod !== null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['paymentMethod'],
+        message: 'Forma de pagamento só deve ser informada em eventos pagos',
+      });
+    }
   }
 });
 

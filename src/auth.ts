@@ -7,7 +7,11 @@ import { and, eq, isNull } from 'drizzle-orm';
 import * as schema from './drizzle/schema';
 import { plans } from './drizzle/schema/plans';
 import { users } from './drizzle/schema/users';
-import { ensureMasterPlanId, ensureFreePlanId } from './plans/plan.utils';
+import {
+  ensureGuestPlanId,
+  ensureMasterPlanId,
+  ensureFreePlanId,
+} from './plans/plan.utils';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -240,6 +244,7 @@ export const auth = betterAuth({
             typeof payload.planId === 'string' &&
             payload.planId.trim().length > 0;
           let planIdToApply: string | null = null;
+          const getGuestPlanId = async () => ensureGuestPlanId(db);
 
           if (!masterExists) {
             result.role = 'MASTER';
@@ -251,7 +256,18 @@ export const auth = betterAuth({
           } else if (payload.role === 'ADMIN') {
             planIdToApply = await ensureMasterPlanId(db);
           } else if (!hasPlanId) {
-            planIdToApply = await requireDefaultPlanId();
+            if (payload.role === 'GUEST') {
+              planIdToApply = await getGuestPlanId();
+              result.role = 'GUEST';
+            } else {
+              planIdToApply = await requireDefaultPlanId();
+            }
+          } else {
+            const guestPlanId = await getGuestPlanId();
+            if (payload.planId === guestPlanId || payload.role === 'GUEST') {
+              planIdToApply = guestPlanId;
+              result.role = 'GUEST';
+            }
           }
 
           if (planIdToApply) {

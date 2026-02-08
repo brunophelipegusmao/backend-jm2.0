@@ -36,12 +36,20 @@ import {
   eventRegistrationSchema,
 } from './dto/event-registration.dto';
 import {
+  EventGuestRegistrationDto,
+  eventGuestRegistrationSchema,
+} from './dto/event-guest-registration.dto';
+import {
   EventsQueryDto,
   PublicEventsQueryDto,
   eventsQuerySchema,
   publicEventsQuerySchema,
 } from './dto/events-query.dto';
 import { UpdateEventDto, updateEventSchema } from './dto/update-event.dto';
+import {
+  ConfirmRegistrationDto,
+  confirmRegistrationSchema,
+} from './dto/confirm-registration.dto';
 
 const normalizeQuery = (query: Record<string, string | string[] | undefined>) =>
   Object.fromEntries(
@@ -138,6 +146,23 @@ export class EventsController {
       },
       userId ?? null,
     );
+  }
+
+  @Post('public/:slug/register-guest')
+  @AllowAnonymous()
+  registerGuest(
+    @Param('slug') slug: string,
+    @Body(new ZodValidationPipe(eventGuestRegistrationSchema))
+    payload: EventGuestRegistrationDto,
+    @Req() request: Request,
+  ) {
+    const userAgentHeader = request.headers['user-agent'];
+    return this.eventsService.registerGuestForEvent(slug, payload, {
+      actorUserId: null,
+      ip: request.ip,
+      userAgent:
+        typeof userAgentHeader === 'string' ? userAgentHeader : undefined,
+    });
   }
 
   @UseGuards(AuthGuard, RolesGuard)
@@ -283,6 +308,25 @@ export class EventsController {
     return this.eventsService.cancelRegistration(
       id,
       registrationId,
+      this.buildAuditContext(session, request),
+    );
+  }
+
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('MASTER', 'ADMIN', 'STAFF')
+  @Post(':id/registrations/:registrationId/confirm')
+  confirmRegistration(
+    @Param('id') id: string,
+    @Param('registrationId') registrationId: string,
+    @Session() session: UserSession,
+    @Req() request: Request,
+    @Body(new ZodValidationPipe(confirmRegistrationSchema))
+    payload: ConfirmRegistrationDto,
+  ) {
+    return this.eventsService.confirmRegistration(
+      id,
+      registrationId,
+      payload,
       this.buildAuditContext(session, request),
     );
   }

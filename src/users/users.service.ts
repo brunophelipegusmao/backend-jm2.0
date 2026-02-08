@@ -6,7 +6,7 @@ import { DatabaseService } from '../db/database.service';
 import { healthProfiles } from '../drizzle/schema/health';
 import { plans } from '../drizzle/schema/plans';
 import { account, users } from '../drizzle/schema/users';
-import { ensureMasterPlanId } from '../plans/plan.utils';
+import { ensureGuestPlanId, ensureMasterPlanId } from '../plans/plan.utils';
 import { FREE_PLAN_SLUGS } from '../common/constants/plans';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { ConvertGuestDto } from './dto/convert-guest.dto';
@@ -101,7 +101,12 @@ export class UsersService {
     const userId = session.user.id;
 
     const [user] = await this.databaseService.database
-      .select({ cpf: users.cpf })
+      .select({
+        cpf: users.cpf,
+        name: users.name,
+        phone: users.phone,
+        role: users.role,
+      })
       .from(users)
       .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
@@ -119,7 +124,20 @@ export class UsersService {
       .limit(1);
 
     const [health] = await this.databaseService.database
-      .select({ id: healthProfiles.id })
+      .select({
+        id: healthProfiles.id,
+        heightCm: healthProfiles.heightCm,
+        weightKg: healthProfiles.weightKg,
+        bloodType: healthProfiles.bloodType,
+        sex: healthProfiles.sex,
+        birthDate: healthProfiles.birthDate,
+        injuries: healthProfiles.injuries,
+        takesMedication: healthProfiles.takesMedication,
+        medications: healthProfiles.medications,
+        exercisesRegularly: healthProfiles.exercisesRegularly,
+        usesSupplementation: healthProfiles.usesSupplementation,
+        supplements: healthProfiles.supplements,
+      })
       .from(healthProfiles)
       .where(
         and(
@@ -129,9 +147,46 @@ export class UsersService {
       )
       .limit(1);
 
+    const nameFilled =
+      typeof user?.name === 'string' && user.name.trim().length > 0;
+    const phoneFilled =
+      typeof user?.phone === 'string' && user.phone.trim().length > 0;
+    const isGuest = user?.role === 'GUEST';
+    const cpfFilled = !!user?.cpf && phoneFilled && (isGuest || nameFilled);
+
+    const isHealthComplete = (profile?: typeof health | null) => {
+      if (!profile) {
+        return false;
+      }
+      if (
+        profile.heightCm === null ||
+        profile.heightCm === undefined ||
+        profile.weightKg === null ||
+        profile.weightKg === undefined ||
+        !profile.bloodType ||
+        !profile.sex ||
+        !profile.birthDate ||
+        !profile.injuries ||
+        typeof profile.takesMedication !== 'boolean' ||
+        typeof profile.exercisesRegularly !== 'boolean' ||
+        typeof profile.usesSupplementation !== 'boolean'
+      ) {
+        return false;
+      }
+      if (profile.takesMedication && !profile.medications?.trim()) {
+        return false;
+      }
+      if (profile.usesSupplementation && !profile.supplements?.trim()) {
+        return false;
+      }
+      return true;
+    };
+
     return {
-      cpfFilled: !!user?.cpf,
-      healthFilled: !!health,
+      cpfFilled,
+      nameFilled,
+      phoneFilled,
+      healthFilled: isGuest ? true : isHealthComplete(health),
       hasPassword: !!passwordAccount,
     };
   }
@@ -220,6 +275,10 @@ export class UsersService {
       if (!phoneNumber) {
         throw new BadRequestException('Telefone obrigatorio para convidados');
       }
+      const cpfNumber = payload.cpf ?? current.cpf;
+      if (!cpfNumber) {
+        throw new BadRequestException('CPF obrigatorio para convidados');
+      }
     }
 
     let planIdToApply: string | undefined;
@@ -228,6 +287,8 @@ export class UsersService {
 
     if (requiresMasterPlan) {
       planIdToApply = await ensureMasterPlanId(this.databaseService.database);
+    } else if (payload.role === 'GUEST') {
+      planIdToApply = await ensureGuestPlanId(this.databaseService.database);
     } else if (payload.planId !== undefined) {
       const [plan] = await this.databaseService.database
         .select({ id: plans.id })
@@ -327,6 +388,23 @@ export class UsersService {
     if (!completeProfileDto.cpf) {
       throw new BadRequestException('CPF é obrigatório');
     }
+    if (!completeProfileDto.phone?.trim()) {
+      throw new BadRequestException('Telefone é obrigatório');
+    }
+
+    const [current] = await this.databaseService.database
+      .select({ id: users.id, role: users.role })
+      .from(users)
+      .where(and(eq(users.id, session.user.id), isNull(users.deletedAt)))
+      .limit(1);
+
+    if (!current) {
+      throw new BadRequestException('Usuario nao encontrado');
+    }
+
+    if (current.role !== 'GUEST' && !completeProfileDto.name?.trim()) {
+      throw new BadRequestException('Nome é obrigatório');
+    }
 
     const [existingCpf] = await this.databaseService.database
       .select({ id: users.id })
@@ -340,6 +418,21 @@ export class UsersService {
       throw new BadRequestException('CPF já cadastrado');
     }
 
+    const [existingPhone] = await this.databaseService.database
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        and(
+          eq(users.phone, completeProfileDto.phone),
+          isNull(users.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (existingPhone && existingPhone.id !== session.user.id) {
+      throw new BadRequestException('Telefone já cadastrado');
+    }
+
     const payload: {
       cpf: string;
       name?: string | null;
@@ -350,12 +443,8 @@ export class UsersService {
       cpf: completeProfileDto.cpf,
     };
 
-    if (completeProfileDto.name !== undefined) {
-      payload.name = completeProfileDto.name;
-    }
-    if (completeProfileDto.phone !== undefined) {
-      payload.phone = completeProfileDto.phone;
-    }
+    payload.name = completeProfileDto.name ?? null;
+    payload.phone = completeProfileDto.phone;
     if (completeProfileDto.address !== undefined) {
       payload.address = completeProfileDto.address;
     }

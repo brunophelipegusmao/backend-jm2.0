@@ -17,12 +17,19 @@ import {
   sql,
   type SQL,
 } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 import { AuditService } from '../audit/audit.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
 import { DatabaseService } from '../db/database.service';
 import { eventRegistrations, events } from '../drizzle/schema/events';
+import { plans } from '../drizzle/schema/plans';
+import { users } from '../drizzle/schema/users';
+import { GUEST_PLAN_SLUG } from '../common/constants/plans';
+import { ensureGuestPlanId } from '../plans/plan.utils';
 import { CreateEventDto } from './dto/create-event.dto';
+import type { EventGuestRegistrationDto } from './dto/event-guest-registration.dto';
 import type { EventRegistrationDto } from './dto/event-registration.dto';
+import type { ConfirmRegistrationDto } from './dto/confirm-registration.dto';
 import type {
   EventsQueryDto,
   PublicEventsQueryDto,
@@ -62,6 +69,38 @@ export class EventsService {
       metadata.userAgent = context.userAgent;
     }
     return Object.keys(metadata).length > 0 ? metadata : null;
+  }
+
+  private async notifyPaymentReview(
+    event: Pick<EventRow, 'id' | 'title' | 'priceCents' | 'paymentMethod'>,
+    registration: RegistrationRow,
+  ) {
+    const webhookUrl = process.env.PAYMENT_REVIEW_WEBHOOK_URL;
+    if (!webhookUrl) {
+      console.info(
+        `[events] Payment review pending for registration ${registration.id} (${event.title})`,
+      );
+      return;
+    }
+
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventId: event.id,
+          eventTitle: event.title,
+          priceCents: event.priceCents,
+          paymentMethod: event.paymentMethod,
+          registrationId: registration.id,
+          userId: registration.userId,
+          status: registration.status,
+          createdAt: registration.createdAt,
+        }),
+      });
+    } catch (error) {
+      console.warn('[events] Failed to notify payment review', error);
+    }
   }
 
   private toDateOnlyDate(value?: string | Date | null) {
@@ -146,7 +185,7 @@ export class EventsService {
       return null;
     }
     if (capacity === undefined || capacity === null) {
-      return null;
+      throw new BadRequestException('Capacidade obrigatoria');
     }
     if (capacity < 1) {
       throw new BadRequestException('Capacidade invalida');
@@ -159,7 +198,7 @@ export class EventsService {
     createdByUserId: string,
     audit?: AuditContext,
   ) {
-    const accessMode = payload.accessMode ?? 'open';
+    const accessMode = payload.accessMode;
     const capacity = this.resolveCapacity(accessMode, payload.capacity ?? null);
     const date = this.normalizeDateInput(payload.date);
     if (!date) {
@@ -170,6 +209,10 @@ export class EventsService {
     if (!baseSlug) {
       throw new BadRequestException('Titulo invalido');
     }
+
+    const requiresConfirmation = payload.isPaid
+      ? true
+      : payload.requiresConfirmation;
 
     const created = await this.databaseService.database.transaction(
       async (tx) => {
@@ -190,10 +233,17 @@ export class EventsService {
                 date,
                 time: payload.time,
                 endTime: payload.endTime ?? null,
-                location: payload.location ?? null,
+                location: payload.location,
                 hideLocation: payload.hideLocation ?? false,
                 accessMode,
                 capacity,
+                allowGuests: payload.allowGuests,
+                requiresConfirmation,
+                isPaid: payload.isPaid,
+                priceCents: payload.isPaid ? payload.priceCents ?? null : null,
+                paymentMethod: payload.isPaid
+                  ? payload.paymentMethod?.trim() ?? null
+                  : null,
                 createdByUserId,
               })
               .returning();
@@ -339,6 +389,41 @@ export class EventsService {
     }
     if (payload.capacity !== undefined || payload.accessMode !== undefined) {
       updates.capacity = capacity;
+    }
+
+    const nextIsPaid = payload.isPaid ?? current.isPaid;
+    const nextRequiresConfirmation =
+      nextIsPaid ? true : payload.requiresConfirmation ?? current.requiresConfirmation;
+    const nextPaymentMethod =
+      payload.paymentMethod !== undefined
+        ? payload.paymentMethod?.trim() ?? null
+        : current.paymentMethod;
+    const nextPriceCents =
+      payload.priceCents !== undefined ? payload.priceCents : current.priceCents;
+
+    if (payload.allowGuests !== undefined) {
+      updates.allowGuests = payload.allowGuests;
+    }
+    if (payload.requiresConfirmation !== undefined || payload.isPaid !== undefined) {
+      updates.requiresConfirmation = nextRequiresConfirmation;
+    }
+    if (payload.isPaid !== undefined) {
+      updates.isPaid = payload.isPaid;
+    }
+    if (payload.priceCents !== undefined || payload.isPaid !== undefined) {
+      updates.priceCents = nextIsPaid ? nextPriceCents ?? null : null;
+    }
+    if (payload.paymentMethod !== undefined || payload.isPaid !== undefined) {
+      updates.paymentMethod = nextIsPaid ? nextPaymentMethod : null;
+    }
+
+    if (nextIsPaid) {
+      if (!nextPriceCents || nextPriceCents < 1) {
+        throw new BadRequestException('Valor do evento é obrigatório');
+      }
+      if (!nextPaymentMethod) {
+        throw new BadRequestException('Forma de pagamento é obrigatória');
+      }
     }
 
     const [updated] = await this.databaseService.database
@@ -620,6 +705,9 @@ export class EventsService {
         userId: eventRegistrations.userId,
         name: eventRegistrations.name,
         email: eventRegistrations.email,
+        confirmedByUserId: eventRegistrations.confirmedByUserId,
+        paymentMethod: eventRegistrations.paymentMethod,
+        paymentAmountCents: eventRegistrations.paymentAmountCents,
         confirmedAt: eventRegistrations.confirmedAt,
         cancelledAt: eventRegistrations.cancelledAt,
         createdAt: eventRegistrations.createdAt,
@@ -762,6 +850,111 @@ export class EventsService {
     };
   }
 
+  async confirmRegistration(
+    eventId: string,
+    registrationId: string,
+    payload: ConfirmRegistrationDto,
+    audit?: AuditContext,
+  ) {
+    const [event] = await this.databaseService.database
+      .select()
+      .from(events)
+      .where(and(eq(events.id, eventId), isNull(events.deletedAt)))
+      .limit(1);
+
+    if (!event) {
+      throw new NotFoundException('Evento nao encontrado');
+    }
+
+    const [registration] = await this.databaseService.database
+      .select()
+      .from(eventRegistrations)
+      .where(
+        and(
+          eq(eventRegistrations.id, registrationId),
+          eq(eventRegistrations.eventId, eventId),
+          isNull(eventRegistrations.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!registration) {
+      throw new NotFoundException('Inscricao nao encontrada');
+    }
+
+    if (registration.status === 'cancelled') {
+      throw new BadRequestException('Inscricao cancelada');
+    }
+
+    const paymentMethod =
+      payload.paymentMethod ?? event.paymentMethod ?? null;
+    const paymentAmountCents =
+      payload.paymentAmountCents ?? event.priceCents ?? null;
+
+    if (event.isPaid) {
+      if (!paymentMethod) {
+        throw new BadRequestException('Forma de pagamento obrigatoria');
+      }
+      if (!paymentAmountCents || paymentAmountCents < 1) {
+        throw new BadRequestException('Valor do pagamento obrigatorio');
+      }
+    }
+
+    if (registration.status !== 'confirmed' && event.capacity !== null) {
+      const [countRow] = await this.databaseService.database
+        .select({ total: sql<number>`count(*)` })
+        .from(eventRegistrations)
+        .where(
+          and(
+            eq(eventRegistrations.eventId, event.id),
+            eq(eventRegistrations.status, 'confirmed'),
+            isNull(eventRegistrations.deletedAt),
+          ),
+        );
+
+      const confirmedCount = Number(countRow?.total ?? 0);
+      if (confirmedCount >= event.capacity) {
+        throw new ConflictException('Evento lotado');
+      }
+    }
+
+    if (registration.status === 'confirmed') {
+      return registration;
+    }
+
+    const now = new Date();
+    const [updated] = await this.databaseService.database
+      .update(eventRegistrations)
+      .set({
+        status: 'confirmed',
+        confirmedAt: now,
+        confirmedByUserId: audit?.actorUserId ?? null,
+        paymentMethod: event.isPaid ? paymentMethod : null,
+        paymentAmountCents: event.isPaid ? paymentAmountCents : null,
+      })
+      .where(eq(eventRegistrations.id, registrationId))
+      .returning();
+
+    const result = updated ?? registration;
+
+    await this.auditService.log({
+      actorUserId: audit?.actorUserId,
+      targetUserId: event.createdByUserId,
+      entity: 'events',
+      entityId: event.id,
+      action: 'registration_confirmed',
+      before: registration,
+      after: result,
+      metadata: this.buildAuditMetadata(audit, {
+        registrationId: result.id,
+        paymentMethod: event.isPaid ? paymentMethod : null,
+        paymentAmountCents: event.isPaid ? paymentAmountCents : null,
+      }),
+    });
+
+    return result;
+  }
+
   async listPublic(filters?: PublicEventsQueryDto) {
     const whereFilters = [
       eq(events.isPublished, true),
@@ -794,6 +987,11 @@ export class EventsService {
         thumbnailUrl: events.thumbnailUrl,
         accessMode: events.accessMode,
         capacity: events.capacity,
+        allowGuests: events.allowGuests,
+        requiresConfirmation: events.requiresConfirmation,
+        isPaid: events.isPaid,
+        priceCents: events.priceCents,
+        paymentMethod: events.paymentMethod,
       })
       .from(events)
       .where(and(...whereFilters))
@@ -835,6 +1033,11 @@ export class EventsService {
         thumbnailUrl: events.thumbnailUrl,
         accessMode: events.accessMode,
         capacity: events.capacity,
+        allowGuests: events.allowGuests,
+        requiresConfirmation: events.requiresConfirmation,
+        isPaid: events.isPaid,
+        priceCents: events.priceCents,
+        paymentMethod: events.paymentMethod,
       })
       .from(events)
       .where(and(...whereFilters))
@@ -893,6 +1096,53 @@ export class EventsService {
       throw new BadRequestException('Evento aberto, nao requer inscricao');
     }
 
+    if (userId) {
+      const [userPlan] = await this.databaseService.database
+        .select({
+          role: users.role,
+          active: users.active,
+          planSlug: plans.slug,
+        })
+        .from(users)
+        .leftJoin(plans, eq(users.planId, plans.id))
+        .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+        .limit(1);
+
+      if (!userPlan || !userPlan.active) {
+        throw new BadRequestException('Usuario inativo');
+      }
+
+      const isGuest =
+        userPlan.role === 'GUEST' || userPlan.planSlug === GUEST_PLAN_SLUG;
+
+      if (isGuest && !event.allowGuests) {
+        throw new BadRequestException('Evento exclusivo para alunos');
+      }
+
+      if (!isGuest && !event.isPaid && !event.requiresConfirmation) {
+        const now = new Date();
+        return {
+          id: randomUUID(),
+          eventId: event.id,
+          userId,
+          name: null,
+          email: null,
+          status: 'confirmed',
+          confirmedAt: now,
+          cancelledAt: null,
+          deletedAt: null,
+          createdAt: now,
+        } satisfies RegistrationRow;
+      }
+    } else {
+      if (!event.allowGuests) {
+        throw new BadRequestException('Evento exclusivo para alunos');
+      }
+      throw new BadRequestException(
+        'Use o cadastro de convidado para este evento',
+      );
+    }
+
     const normalizedEmail = payload.email?.trim().toLowerCase();
     const normalizedName = payload.name?.trim();
 
@@ -936,27 +1186,30 @@ export class EventsService {
           }
         }
 
-        let status: RegistrationRow['status'] = 'confirmed';
-        let confirmedAt: Date | null = new Date();
+    let status: RegistrationRow['status'] = 'confirmed';
+    let confirmedAt: Date | null = new Date();
 
-        if (event.capacity !== null) {
-          const [countRow] = await tx
-            .select({ total: sql<number>`count(*)` })
-            .from(eventRegistrations)
-            .where(
-              and(
-                eq(eventRegistrations.eventId, event.id),
-                eq(eventRegistrations.status, 'confirmed'),
-                isNull(eventRegistrations.deletedAt),
-              ),
-            );
+    if (event.isPaid || event.requiresConfirmation) {
+      status = 'pending';
+      confirmedAt = null;
+    } else if (event.capacity !== null) {
+      const [countRow] = await tx
+        .select({ total: sql<number>`count(*)` })
+        .from(eventRegistrations)
+        .where(
+          and(
+            eq(eventRegistrations.eventId, event.id),
+            eq(eventRegistrations.status, 'confirmed'),
+            isNull(eventRegistrations.deletedAt),
+          ),
+        );
 
-          const confirmedCount = Number(countRow?.total ?? 0);
-          if (confirmedCount >= event.capacity) {
-            status = 'waitlisted';
-            confirmedAt = null;
-          }
-        }
+      const confirmedCount = Number(countRow?.total ?? 0);
+      if (confirmedCount >= event.capacity) {
+        status = 'waitlisted';
+        confirmedAt = null;
+      }
+    }
 
         try {
           const [created] = await tx
@@ -988,8 +1241,221 @@ export class EventsService {
       },
     );
 
+    if (event.isPaid) {
+      await this.notifyPaymentReview(event, registration);
+    }
+
     await this.auditService.log({
       actorUserId: context?.actorUserId ?? userId ?? null,
+      targetUserId: event.createdByUserId,
+      entity: 'events',
+      entityId: event.id,
+      action: 'registration_created',
+      before: null,
+      after: registration,
+      metadata: this.buildAuditMetadata(context, {
+        registrationId: registration.id,
+        status: registration.status,
+      }),
+    });
+
+    return registration;
+  }
+
+  async registerGuestForEvent(
+    slug: string,
+    payload: EventGuestRegistrationDto,
+    context?: AuditContext,
+  ) {
+    const [event] = await this.databaseService.database
+      .select()
+      .from(events)
+      .where(
+        and(
+          eq(events.slug, slug),
+          eq(events.isPublished, true),
+          isNull(events.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!event) {
+      throw new NotFoundException('Evento nao encontrado');
+    }
+
+    if (event.accessMode !== 'registered_only') {
+      throw new BadRequestException('Evento aberto, nao requer inscricao');
+    }
+    if (!event.allowGuests) {
+      throw new BadRequestException('Evento exclusivo para alunos');
+    }
+
+    const normalizedEmail = payload.email.trim().toLowerCase();
+    const normalizedCpf = payload.cpf.replace(/\D/g, '');
+    const normalizedPhone = payload.phone.trim();
+    const normalizedName = payload.name?.trim() || null;
+
+    const guestPlanId = await ensureGuestPlanId(
+      this.databaseService.database,
+    );
+
+    const registration = await this.databaseService.database.transaction(
+      async (tx) => {
+        const candidates = await tx
+          .select({
+            id: users.id,
+            email: users.email,
+            cpf: users.cpf,
+            phone: users.phone,
+            name: users.name,
+            active: users.active,
+            role: users.role,
+            planId: users.planId,
+          })
+          .from(users)
+          .where(
+            and(
+              isNull(users.deletedAt),
+              or(
+                eq(users.email, normalizedEmail),
+                eq(users.cpf, normalizedCpf),
+                eq(users.phone, normalizedPhone),
+              ),
+            ),
+          );
+
+        const uniqueIds = new Set(candidates.map((row) => row.id));
+        if (uniqueIds.size > 1) {
+          throw new BadRequestException(
+            'Email, CPF e telefone ja cadastrados em usuarios diferentes',
+          );
+        }
+
+        let userId: string;
+        const existing = candidates[0];
+
+        if (existing) {
+          if (!existing.active) {
+            throw new BadRequestException('Usuario inativo');
+          }
+          if (existing.email && existing.email.toLowerCase() !== normalizedEmail) {
+            throw new BadRequestException('Email ja cadastrado');
+          }
+          if (existing.cpf && existing.cpf !== normalizedCpf) {
+            throw new BadRequestException('CPF ja cadastrado');
+          }
+          if (existing.phone && existing.phone !== normalizedPhone) {
+            throw new BadRequestException('Telefone ja cadastrado');
+          }
+
+          userId = existing.id;
+
+          const updates: Partial<typeof users.$inferInsert> = {};
+          if (!existing.cpf) {
+            updates.cpf = normalizedCpf;
+          }
+          if (!existing.phone) {
+            updates.phone = normalizedPhone;
+          }
+          if (!existing.name && normalizedName) {
+            updates.name = normalizedName;
+          }
+          if (existing.role === 'GUEST' && existing.planId !== guestPlanId) {
+            updates.planId = guestPlanId;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await tx
+              .update(users)
+              .set({ ...updates, updatedAt: new Date() })
+              .where(eq(users.id, userId));
+          }
+        } else {
+          const [created] = await tx
+            .insert(users)
+            .values({
+              email: normalizedEmail,
+              cpf: normalizedCpf,
+              phone: normalizedPhone,
+              name: normalizedName,
+              role: 'GUEST',
+              planId: guestPlanId,
+              active: true,
+            })
+            .returning({ id: users.id });
+
+          if (!created) {
+            throw new BadRequestException('Falha ao criar usuario');
+          }
+
+          userId = created.id;
+        }
+
+        const [existingRegistration] = await tx
+          .select({ id: eventRegistrations.id })
+          .from(eventRegistrations)
+          .where(
+            and(
+              eq(eventRegistrations.eventId, event.id),
+              eq(eventRegistrations.userId, userId),
+              isNull(eventRegistrations.deletedAt),
+            ),
+          )
+          .limit(1);
+
+        if (existingRegistration) {
+          throw new ConflictException('Inscricao ja existente');
+        }
+
+        let status: RegistrationRow['status'] = 'confirmed';
+        let confirmedAt: Date | null = new Date();
+
+        if (event.isPaid || event.requiresConfirmation) {
+          status = 'pending';
+          confirmedAt = null;
+        } else if (event.capacity !== null) {
+          const [countRow] = await tx
+            .select({ total: sql<number>`count(*)` })
+            .from(eventRegistrations)
+            .where(
+              and(
+                eq(eventRegistrations.eventId, event.id),
+                eq(eventRegistrations.status, 'confirmed'),
+                isNull(eventRegistrations.deletedAt),
+              ),
+            );
+
+          const confirmedCount = Number(countRow?.total ?? 0);
+          if (confirmedCount >= event.capacity) {
+            status = 'waitlisted';
+            confirmedAt = null;
+          }
+        }
+
+        const [createdRegistration] = await tx
+          .insert(eventRegistrations)
+          .values({
+            eventId: event.id,
+            userId,
+            status,
+            confirmedAt,
+          })
+          .returning();
+
+        if (!createdRegistration) {
+          throw new BadRequestException('Falha ao registrar inscricao');
+        }
+
+        return createdRegistration;
+      },
+    );
+
+    if (event.isPaid) {
+      await this.notifyPaymentReview(event, registration);
+    }
+
+    await this.auditService.log({
+      actorUserId: context?.actorUserId ?? null,
       targetUserId: event.createdByUserId,
       entity: 'events',
       entityId: event.id,

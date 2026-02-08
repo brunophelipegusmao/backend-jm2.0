@@ -8,9 +8,7 @@ import type { Request } from 'express';
 import { and, eq, isNull } from 'drizzle-orm';
 import { DatabaseService } from '../db/database.service';
 import { healthProfiles } from '../drizzle/schema/health';
-import { plans } from '../drizzle/schema/plans';
 import { users } from '../drizzle/schema/users';
-import { FREE_PLAN_SLUGS } from '../common/constants/plans';
 
 type SessionUser = { id?: string };
 type AuthSession = { user?: SessionUser };
@@ -56,11 +54,12 @@ export class ProfileCompletionGuard implements CanActivate {
     const [user] = await this.databaseService.database
       .select({
         cpf: users.cpf,
+        name: users.name,
+        phone: users.phone,
         active: users.active,
-        planSlug: plans.slug,
+        role: users.role,
       })
       .from(users)
-      .leftJoin(plans, eq(users.planId, plans.id))
       .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
 
@@ -69,30 +68,76 @@ export class ProfileCompletionGuard implements CanActivate {
     }
 
     const missingCpf = !user?.cpf;
-    const requiresHealth =
-      !user.planSlug || !FREE_PLAN_SLUGS.has(user.planSlug);
-    let missingHealth = false;
+    const isGuest = user?.role === 'GUEST';
+    const missingName =
+      !isGuest &&
+      (typeof user?.name !== 'string' || user.name.trim().length === 0);
+    const missingPhone =
+      typeof user?.phone !== 'string' || user.phone.trim().length === 0;
 
-    if (requiresHealth) {
-      const [health] = await this.databaseService.database
-        .select({ id: healthProfiles.id })
-        .from(healthProfiles)
-        .where(
-          and(
-            eq(healthProfiles.userId, userId),
-            isNull(healthProfiles.deletedAt),
-          ),
-        )
-        .limit(1);
+    const [health] = isGuest
+      ? [null]
+      : await this.databaseService.database
+          .select({
+            id: healthProfiles.id,
+            heightCm: healthProfiles.heightCm,
+            weightKg: healthProfiles.weightKg,
+            bloodType: healthProfiles.bloodType,
+            sex: healthProfiles.sex,
+            birthDate: healthProfiles.birthDate,
+            injuries: healthProfiles.injuries,
+            takesMedication: healthProfiles.takesMedication,
+            medications: healthProfiles.medications,
+            exercisesRegularly: healthProfiles.exercisesRegularly,
+            usesSupplementation: healthProfiles.usesSupplementation,
+            supplements: healthProfiles.supplements,
+          })
+          .from(healthProfiles)
+          .where(
+            and(
+              eq(healthProfiles.userId, userId),
+              isNull(healthProfiles.deletedAt),
+            ),
+          )
+          .limit(1);
 
-      missingHealth = !health;
-    }
+    const isHealthComplete = (profile?: typeof health | null) => {
+      if (!profile) {
+        return false;
+      }
+      if (
+        profile.heightCm === null ||
+        profile.heightCm === undefined ||
+        profile.weightKg === null ||
+        profile.weightKg === undefined ||
+        !profile.bloodType ||
+        !profile.sex ||
+        !profile.birthDate ||
+        !profile.injuries ||
+        typeof profile.takesMedication !== 'boolean' ||
+        typeof profile.exercisesRegularly !== 'boolean' ||
+        typeof profile.usesSupplementation !== 'boolean'
+      ) {
+        return false;
+      }
+      if (profile.takesMedication && !profile.medications?.trim()) {
+        return false;
+      }
+      if (profile.usesSupplementation && !profile.supplements?.trim()) {
+        return false;
+      }
+      return true;
+    };
 
-    if (missingCpf || missingHealth) {
+    const missingHealth = isGuest ? false : !isHealthComplete(health);
+
+    if (missingCpf || missingName || missingPhone || missingHealth) {
       throw new ForbiddenException({
         message: 'Perfil incompleto',
         missing: {
           cpf: missingCpf,
+          name: missingName,
+          phone: missingPhone,
           health: missingHealth,
         },
       });

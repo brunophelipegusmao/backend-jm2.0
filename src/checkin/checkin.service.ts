@@ -14,7 +14,7 @@ import { CreateCheckinDto } from './dto/create-checkin.dto';
 import { CreateIdentifierCheckinDto } from './dto/create-identifier-checkin.dto';
 import { UpdateCheckinDto } from './dto/update-checkin.dto';
 
-const CHECKIN_ROLES = new Set(['STAFF', 'COACH', 'STUDENT']);
+const CHECKIN_ROLES = new Set(['STAFF', 'COACH', 'STUDENT', 'MASTER', 'ADMIN']);
 const CPF_REGEX = /^\d{11}$/;
 const CHECKIN_ANON_ACTION = 'anonymous_create';
 
@@ -94,6 +94,10 @@ export class CheckinService {
 
     if (!user.active) {
       throw new ForbiddenException('Usuario inativo');
+    }
+
+    if (user.role === 'GUEST') {
+      throw new ForbiddenException('Convidado nao pode fazer check-in');
     }
 
     if (!CHECKIN_ROLES.has(user.role)) {

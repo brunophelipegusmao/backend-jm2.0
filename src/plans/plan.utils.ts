@@ -3,6 +3,9 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { plans } from '../drizzle/schema/plans';
 import {
   FREE_PLAN_SLUG,
+  GUEST_PLAN_DESCRIPTION,
+  GUEST_PLAN_NAME,
+  GUEST_PLAN_SLUG,
   LEGACY_FREE_PLAN_SLUG,
   MASTER_PLAN_DESCRIPTION,
   MASTER_PLAN_NAME,
@@ -86,6 +89,8 @@ let cachedMasterPlanId: string | null = null;
 
 let cachedFreePlanId: string | null = null;
 
+let cachedGuestPlanId: string | null = null;
+
 export async function ensureFreePlanId(database: AppDatabase) {
   if (cachedFreePlanId) {
     return cachedFreePlanId;
@@ -127,6 +132,32 @@ export async function ensureFreePlanId(database: AppDatabase) {
   });
 
   return cachedFreePlanId;
+}
+
+export async function ensureGuestPlanId(database: AppDatabase) {
+  if (cachedGuestPlanId) {
+    return cachedGuestPlanId;
+  }
+
+  const guestPlanId = await findActivePlanIdBySlug(database, GUEST_PLAN_SLUG);
+  if (guestPlanId) {
+    cachedGuestPlanId = guestPlanId;
+    return cachedGuestPlanId;
+  }
+
+  cachedGuestPlanId = await ensurePlanBySlug(database, {
+    slug: GUEST_PLAN_SLUG,
+    name: GUEST_PLAN_NAME,
+    description: GUEST_PLAN_DESCRIPTION,
+    priceCents: 0,
+    promoPriceCents: null,
+    promoActive: false,
+    popular: false,
+    active: true,
+    durationDays: null,
+  });
+
+  return cachedGuestPlanId;
 }
 
 export async function ensureMasterPlanId(database: AppDatabase) {

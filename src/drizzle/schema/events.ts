@@ -23,6 +23,7 @@ export const eventRegistrationStatus = pgEnum('event_registration_status', [
   'confirmed',
   'cancelled',
   'waitlisted',
+  'pending',
 ]);
 
 export const events = pgTable(
@@ -35,8 +36,15 @@ export const events = pgTable(
     date: date('date').notNull(),
     time: varchar('time', { length: 5 }).notNull(),
     endTime: varchar('end_time', { length: 5 }),
-    location: varchar('location', { length: 160 }),
+    location: varchar('location', { length: 160 }).notNull(),
     hideLocation: boolean('hide_location').notNull().default(false),
+    allowGuests: boolean('allow_guests').notNull().default(true),
+    requiresConfirmation: boolean('requires_confirmation')
+      .notNull()
+      .default(false),
+    isPaid: boolean('is_paid').notNull().default(false),
+    priceCents: integer('price_cents'),
+    paymentMethod: varchar('payment_method', { length: 60 }),
     thumbnailPublicId: varchar('thumbnail_public_id', { length: 140 }),
     thumbnailUrl: varchar('thumbnail_url', { length: 500 }),
     isPublished: boolean('is_published').notNull().default(false),
@@ -86,6 +94,11 @@ export const eventRegistrations = pgTable(
     }),
     name: varchar('name', { length: 160 }),
     email: varchar('email', { length: 160 }),
+    confirmedByUserId: uuid('confirmed_by_user_id').references(() => users.id, {
+      onDelete: 'restrict',
+    }),
+    paymentMethod: varchar('payment_method', { length: 60 }),
+    paymentAmountCents: integer('payment_amount_cents'),
     status: eventRegistrationStatus('status').notNull().default('confirmed'),
     confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
