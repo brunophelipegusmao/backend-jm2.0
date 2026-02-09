@@ -5,3 +5,5 @@ export const eventRegistrationStatusValues = [
   'cancelled',
   'waitlisted',
 ] as const;
+
+export const eventStatusValues = ['draft', 'published', 'cancelled'] as const;

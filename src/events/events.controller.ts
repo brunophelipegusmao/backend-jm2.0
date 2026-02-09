@@ -271,6 +271,34 @@ export class EventsController {
 
   @UseGuards(AuthGuard, RolesGuard)
   @Roles('MASTER', 'ADMIN', 'STAFF')
+  @Post(':id/cancel')
+  cancel(
+    @Param('id') id: string,
+    @Session() session: UserSession,
+    @Req() request: Request,
+  ) {
+    return this.eventsService.cancel(
+      id,
+      this.buildAuditContext(session, request),
+    );
+  }
+
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('MASTER', 'ADMIN', 'STAFF')
+  @Post(':id/uncancel')
+  uncancel(
+    @Param('id') id: string,
+    @Session() session: UserSession,
+    @Req() request: Request,
+  ) {
+    return this.eventsService.uncancel(
+      id,
+      this.buildAuditContext(session, request),
+    );
+  }
+
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('MASTER', 'ADMIN', 'STAFF')
   @Post(':id/thumbnail')
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: MAX_IMAGE_SIZE_BYTES } }),

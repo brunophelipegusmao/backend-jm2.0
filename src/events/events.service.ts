@@ -57,6 +57,51 @@ export class EventsService {
     private readonly cloudinaryService: CloudinaryService,
   ) {}
 
+  private eventStatusSupported: boolean | null = null;
+
+  private async supportsEventStatusColumn() {
+    if (this.eventStatusSupported !== null) {
+      return this.eventStatusSupported;
+    }
+    try {
+      const rows = await this.databaseService.rawQuery(
+        `select 1 from information_schema.columns where table_schema = 'public' and table_name = 'tb_events' and column_name = 'status' limit 1`,
+      );
+      this.eventStatusSupported = Array.isArray(rows)
+        ? rows.length > 0
+        : Boolean((rows as any)?.length);
+    } catch {
+      this.eventStatusSupported = true;
+    }
+    return this.eventStatusSupported;
+  }
+
+  private async buildPublishedFilters(filters?: PublicEventsQueryDto) {
+    const whereFilters: SQL[] = [
+      eq(events.isPublished, true),
+      isNull(events.deletedAt),
+    ];
+
+    if (await this.supportsEventStatusColumn()) {
+      whereFilters.push(eq(events.status, 'published'));
+    }
+
+    if (filters?.from) {
+      const from = this.normalizeDateInput(filters.from);
+      if (from) {
+        whereFilters.push(gte(events.date, from));
+      }
+    }
+    if (filters?.to) {
+      const to = this.normalizeDateInput(filters.to);
+      if (to) {
+        whereFilters.push(lte(events.date, to));
+      }
+    }
+
+    return whereFilters;
+  }
+
   private buildAuditMetadata(
     context?: AuditContext,
     extra?: Record<string, unknown>,
@@ -244,6 +289,7 @@ export class EventsService {
                 paymentMethod: payload.isPaid
                   ? payload.paymentMethod?.trim() ?? null
                   : null,
+                status: 'draft',
                 createdByUserId,
               })
               .returning();
@@ -569,12 +615,16 @@ export class EventsService {
     if (!current) {
       throw new NotFoundException('Evento nao encontrado');
     }
+    if (current.status === 'cancelled') {
+      throw new BadRequestException('Evento cancelado');
+    }
 
     const [published] = await this.databaseService.database
       .update(events)
       .set({
         isPublished: true,
         publishedAt: new Date(),
+        status: 'published',
         updatedAt: new Date(),
       })
       .where(and(eq(events.id, id), isNull(events.deletedAt)))
@@ -606,10 +656,18 @@ export class EventsService {
     if (!current) {
       throw new NotFoundException('Evento nao encontrado');
     }
+    if (current.status === 'cancelled') {
+      throw new BadRequestException('Evento cancelado');
+    }
 
     const [unpublished] = await this.databaseService.database
       .update(events)
-      .set({ isPublished: false, publishedAt: null, updatedAt: new Date() })
+      .set({
+        isPublished: false,
+        publishedAt: null,
+        status: 'draft',
+        updatedAt: new Date(),
+      })
       .where(and(eq(events.id, id), isNull(events.deletedAt)))
       .returning();
 
@@ -621,6 +679,90 @@ export class EventsService {
       entity: 'events',
       entityId: result.id,
       action: 'unpublished',
+      before: current,
+      after: result,
+      metadata: this.buildAuditMetadata(audit),
+    });
+
+    return result;
+  }
+
+  async cancel(id: string, audit?: AuditContext) {
+    const [current] = await this.databaseService.database
+      .select()
+      .from(events)
+      .where(and(eq(events.id, id), isNull(events.deletedAt)))
+      .limit(1);
+
+    if (!current) {
+      throw new NotFoundException('Evento nao encontrado');
+    }
+
+    if (current.status === 'cancelled') {
+      return current;
+    }
+
+    const [cancelled] = await this.databaseService.database
+      .update(events)
+      .set({
+        status: 'cancelled',
+        isPublished: false,
+        publishedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(events.id, id), isNull(events.deletedAt)))
+      .returning();
+
+    const result = cancelled ?? current;
+
+    await this.auditService.log({
+      actorUserId: audit?.actorUserId,
+      targetUserId: result.createdByUserId,
+      entity: 'events',
+      entityId: result.id,
+      action: 'cancelled',
+      before: current,
+      after: result,
+      metadata: this.buildAuditMetadata(audit),
+    });
+
+    return result;
+  }
+
+  async uncancel(id: string, audit?: AuditContext) {
+    const [current] = await this.databaseService.database
+      .select()
+      .from(events)
+      .where(and(eq(events.id, id), isNull(events.deletedAt)))
+      .limit(1);
+
+    if (!current) {
+      throw new NotFoundException('Evento nao encontrado');
+    }
+
+    if (current.status !== 'cancelled') {
+      throw new BadRequestException('Evento nao esta cancelado');
+    }
+
+    const [restored] = await this.databaseService.database
+      .update(events)
+      .set({
+        status: 'draft',
+        isPublished: false,
+        publishedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(events.id, id), isNull(events.deletedAt)))
+      .returning();
+
+    const result = restored ?? current;
+
+    await this.auditService.log({
+      actorUserId: audit?.actorUserId,
+      targetUserId: result.createdByUserId,
+      entity: 'events',
+      entityId: result.id,
+      action: 'uncancelled',
       before: current,
       after: result,
       metadata: this.buildAuditMetadata(audit),
@@ -958,6 +1100,7 @@ export class EventsService {
   async listPublic(filters?: PublicEventsQueryDto) {
     const whereFilters = [
       eq(events.isPublished, true),
+      eq(events.status, 'published'),
       isNull(events.deletedAt),
     ];
 
@@ -1006,6 +1149,7 @@ export class EventsService {
   async listCalendar(filters?: PublicEventsQueryDto) {
     const whereFilters = [
       eq(events.isPublished, true),
+      eq(events.status, 'published'),
       isNull(events.deletedAt),
     ];
 
@@ -1052,6 +1196,7 @@ export class EventsService {
         and(
           eq(events.slug, slug),
           eq(events.isPublished, true),
+          eq(events.status, 'published'),
           isNull(events.deletedAt),
         ),
       )
@@ -1083,6 +1228,7 @@ export class EventsService {
         and(
           eq(events.slug, slug),
           eq(events.isPublished, true),
+          eq(events.status, 'published'),
           isNull(events.deletedAt),
         ),
       )
@@ -1127,6 +1273,9 @@ export class EventsService {
           userId,
           name: null,
           email: null,
+          confirmedByUserId: null,
+          paymentMethod: null,
+          paymentAmountCents: null,
           status: 'confirmed',
           confirmedAt: now,
           cancelledAt: null,
@@ -1274,6 +1423,7 @@ export class EventsService {
         and(
           eq(events.slug, slug),
           eq(events.isPublished, true),
+          eq(events.status, 'published'),
           isNull(events.deletedAt),
         ),
       )

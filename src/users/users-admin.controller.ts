@@ -38,6 +38,11 @@ export class UsersAdminController {
     return this.usersService.getByIdForAdmin(id);
   }
 
+  @Get()
+  findAll() {
+    return this.usersService.listForAdmin();
+  }
+
   @Patch(':id')
   update(
     @Param('id') id: string,

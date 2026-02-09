@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
 import { DatabaseService } from '../db/database.service';
@@ -92,6 +92,33 @@ export class UsersService {
       .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1)
       .then((rows) => rows[0] ?? null);
+  }
+
+  listForAdmin() {
+    return this.databaseService.database
+      .select({
+        id: users.id,
+        email: users.email,
+        emailVerified: users.emailVerified,
+        cpf: users.cpf,
+        name: users.name,
+        image: users.image,
+        avatarPublicId: users.avatarPublicId,
+        avatarUrl: users.avatarUrl,
+        address: users.address,
+        phone: users.phone,
+        active: users.active,
+        role: users.role,
+        planId: users.planId,
+        planName: plans.name,
+        planSlug: plans.slug,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
+      })
+      .from(users)
+      .leftJoin(plans, eq(users.planId, plans.id))
+      .where(isNull(users.deletedAt))
+      .orderBy(asc(users.name), asc(users.email));
   }
 
   async getProfileStatus(session: { user?: { id?: string } }) {

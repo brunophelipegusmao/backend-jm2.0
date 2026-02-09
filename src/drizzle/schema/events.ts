@@ -19,6 +19,12 @@ export const eventAccessMode = pgEnum('event_access_mode', [
   'registered_only',
 ]);
 
+export const eventStatus = pgEnum('event_status', [
+  'draft',
+  'published',
+  'cancelled',
+]);
+
 export const eventRegistrationStatus = pgEnum('event_registration_status', [
   'confirmed',
   'cancelled',
@@ -47,6 +53,7 @@ export const events = pgTable(
     paymentMethod: varchar('payment_method', { length: 60 }),
     thumbnailPublicId: varchar('thumbnail_public_id', { length: 140 }),
     thumbnailUrl: varchar('thumbnail_url', { length: 500 }),
+    status: eventStatus('status').notNull().default('draft'),
     isPublished: boolean('is_published').notNull().default(false),
     publishedAt: timestamp('published_at', { withTimezone: true }),
     accessMode: eventAccessMode('access_mode').notNull().default('open'),

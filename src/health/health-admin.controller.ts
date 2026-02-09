@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Put,
   Req,
   UseGuards,
@@ -15,6 +16,10 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { createHealthSchema, CreateHealthDto } from './dto/create-health.dto';
+import {
+  computeBodyCompositionSchema,
+  ComputeBodyCompositionDto,
+} from './dto/compute-body-composition.dto';
 import { updateHealthSchema, UpdateHealthDto } from './dto/update-health.dto';
 import { HealthService } from './health.service';
 
@@ -67,5 +72,14 @@ export class HealthAdminController {
       ip: request.ip,
       userAgent: request.headers['user-agent'],
     });
+  }
+
+  @Post(':userId/body-composition/compute')
+  computeBodyComposition(
+    @Param('userId') userId: string,
+    @Body(new ZodValidationPipe(computeBodyCompositionSchema))
+    payload: ComputeBodyCompositionDto,
+  ) {
+    return this.healthService.computeFromPayload(payload);
   }
 }
