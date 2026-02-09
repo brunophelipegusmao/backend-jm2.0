@@ -6,10 +6,11 @@ import { AuditModule } from '../audit/audit.module';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { UsersAdminController } from './users-admin.controller';
 import { CloudinaryModule } from '../common/services/cloudinary.module';
+import { BirthdayEventsService } from '../events/birthday-events.service';
 
 @Module({
   imports: [DatabaseModule, AuditModule, CloudinaryModule],
   controllers: [UsersController, UsersAdminController],
-  providers: [UsersService, RolesGuard],
+  providers: [UsersService, RolesGuard, BirthdayEventsService],
 })
 export class UsersModule {}

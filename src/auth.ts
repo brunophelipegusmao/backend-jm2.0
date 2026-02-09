@@ -10,13 +10,13 @@ import { getOAuthState } from 'better-auth/api';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { and, eq, isNull } from 'drizzle-orm';
 import * as schema from './drizzle/schema';
-import { plans } from './drizzle/schema/plans';
 import { users } from './drizzle/schema/users';
 import {
   ensureGuestPlanId,
   ensureMasterPlanId,
   ensureFreePlanId,
 } from './plans/plan.utils';
+import { MASTER_PLAN_ROLE_SET } from './common/constants/roles';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -291,7 +291,10 @@ export const auth = betterAuth({
             throw new APIError('BAD_REQUEST', {
               message: 'Ja existe um master cadastrado',
             });
-          } else if (payload.role === 'ADMIN') {
+          } else if (
+            typeof payload.role === 'string' &&
+            MASTER_PLAN_ROLE_SET.has(payload.role)
+          ) {
             planIdToApply = await ensureMasterPlanId(db);
           } else if (!hasPlanId) {
             if (payload.role === 'GUEST') {

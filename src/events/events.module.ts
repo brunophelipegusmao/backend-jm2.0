@@ -5,10 +5,11 @@ import { DatabaseModule } from '../db/database.module';
 import { AuditModule } from '../audit/audit.module';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CloudinaryModule } from '../common/services/cloudinary.module';
+import { BirthdayEventsService } from './birthday-events.service';
 
 @Module({
   imports: [DatabaseModule, AuditModule, CloudinaryModule],
   controllers: [EventsController],
-  providers: [EventsService, RolesGuard],
+  providers: [EventsService, RolesGuard, BirthdayEventsService],
 })
 export class EventsModule {}

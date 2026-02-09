@@ -26,6 +26,7 @@ import { plans } from '../drizzle/schema/plans';
 import { users } from '../drizzle/schema/users';
 import { GUEST_PLAN_SLUG } from '../common/constants/plans';
 import { ensureGuestPlanId } from '../plans/plan.utils';
+import { BirthdayEventsService } from './birthday-events.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import type { EventGuestRegistrationDto } from './dto/event-guest-registration.dto';
 import type { EventRegistrationDto } from './dto/event-registration.dto';
@@ -55,7 +56,12 @@ export class EventsService {
     private readonly databaseService: DatabaseService,
     private readonly auditService: AuditService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly birthdayEventsService: BirthdayEventsService,
   ) {}
+
+  private async ensureBirthdayEventsUpToDate() {
+    await this.birthdayEventsService.syncAllUsersFromHealthIfStale();
+  }
 
   private eventStatusSupported: boolean | null = null;
 
@@ -259,58 +265,58 @@ export class EventsService {
       ? true
       : payload.requiresConfirmation;
 
-    const created = await this.databaseService.database.transaction(
-      async (tx) => {
-        let attempt = 0;
-        while (attempt < 10) {
-          const slug =
-            attempt === 0
-              ? this.buildSlugCandidate(baseSlug)
-              : this.buildSlugCandidate(baseSlug, attempt + 1);
+    let attempt = 0;
+    let created: EventRow | null = null;
+    while (attempt < 10) {
+      const slug =
+        attempt === 0
+          ? this.buildSlugCandidate(baseSlug)
+          : this.buildSlugCandidate(baseSlug, attempt + 1);
 
-          try {
-            const [event] = await tx
-              .insert(events)
-              .values({
-                title: payload.title,
-                slug,
-                description: payload.description,
-                date,
-                time: payload.time,
-                endTime: payload.endTime ?? null,
-                location: payload.location,
-                hideLocation: payload.hideLocation ?? false,
-                accessMode,
-                capacity,
-                allowGuests: payload.allowGuests,
-                requiresConfirmation,
-                isPaid: payload.isPaid,
-                priceCents: payload.isPaid ? payload.priceCents ?? null : null,
-                paymentMethod: payload.isPaid
-                  ? payload.paymentMethod?.trim() ?? null
-                  : null,
-                status: 'draft',
-                createdByUserId,
-              })
-              .returning();
+      try {
+        const [event] = await this.databaseService.database
+          .insert(events)
+          .values({
+            title: payload.title,
+            slug,
+            description: payload.description,
+            date,
+            time: payload.time,
+            endTime: payload.endTime ?? null,
+            location: payload.location,
+            hideLocation: payload.hideLocation ?? false,
+            accessMode,
+            capacity,
+            allowGuests: payload.allowGuests,
+            requiresConfirmation,
+            isPaid: payload.isPaid,
+            priceCents: payload.isPaid ? payload.priceCents ?? null : null,
+            paymentMethod: payload.isPaid
+              ? payload.paymentMethod?.trim() ?? null
+              : null,
+            status: 'draft',
+            createdByUserId,
+          })
+          .returning();
 
-            if (!event) {
-              throw new BadRequestException('Falha ao criar evento');
-            }
-
-            return event;
-          } catch (error) {
-            if (this.isUniqueViolation(error, SLUG_UNIQUE_CONSTRAINT)) {
-              attempt += 1;
-              continue;
-            }
-            throw error;
-          }
+        if (!event) {
+          throw new BadRequestException('Falha ao criar evento');
         }
 
-        throw new ConflictException('Falha ao gerar slug unico');
-      },
-    );
+        created = event;
+        break;
+      } catch (error) {
+        if (this.isUniqueViolation(error, SLUG_UNIQUE_CONSTRAINT)) {
+          attempt += 1;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!created) {
+      throw new ConflictException('Falha ao gerar slug unico');
+    }
 
     await this.auditService.log({
       actorUserId: audit?.actorUserId,
@@ -330,6 +336,7 @@ export class EventsService {
   }
 
   async findAll(filters?: EventsQueryDto) {
+    await this.ensureBirthdayEventsUpToDate();
     const whereFilters: SQL[] = [];
 
     if (!filters?.includeDeleted) {
@@ -538,58 +545,52 @@ export class EventsService {
       throw new NotFoundException('Evento nao encontrado');
     }
 
-    const restored = await this.databaseService.database.transaction(
-      async (tx) => {
-        let slug = current.slug;
+    let slug = current.slug;
 
-        const [slugConflict] = await tx
+    const [slugConflict] = await this.databaseService.database
+      .select({ id: events.id })
+      .from(events)
+      .where(
+        and(
+          eq(events.slug, slug),
+          isNull(events.deletedAt),
+          sql`${events.id} <> ${current.id}`,
+        ),
+      )
+      .limit(1);
+
+    if (slugConflict) {
+      const baseSlug = this.slugify(slug) || slug;
+      let attempt = 1;
+      let resolved = false;
+      while (attempt < 10) {
+        const candidate = this.buildSlugCandidate(baseSlug, attempt + 1);
+        const [existing] = await this.databaseService.database
           .select({ id: events.id })
           .from(events)
-          .where(
-            and(
-              eq(events.slug, slug),
-              isNull(events.deletedAt),
-              sql`${events.id} <> ${current.id}`,
-            ),
-          )
+          .where(and(eq(events.slug, candidate), isNull(events.deletedAt)))
           .limit(1);
-
-        if (slugConflict) {
-          const baseSlug = this.slugify(slug) || slug;
-          let attempt = 1;
-          let resolved = false;
-          while (attempt < 10) {
-            const candidate = this.buildSlugCandidate(baseSlug, attempt + 1);
-            const [existing] = await tx
-              .select({ id: events.id })
-              .from(events)
-              .where(and(eq(events.slug, candidate), isNull(events.deletedAt)))
-              .limit(1);
-            if (!existing) {
-              slug = candidate;
-              resolved = true;
-              break;
-            }
-            attempt += 1;
-          }
-          if (!resolved) {
-            throw new ConflictException('Falha ao restaurar slug');
-          }
+        if (!existing) {
+          slug = candidate;
+          resolved = true;
+          break;
         }
+        attempt += 1;
+      }
+      if (!resolved) {
+        throw new ConflictException('Falha ao restaurar slug');
+      }
+    }
 
-        const [updated] = await tx
-          .update(events)
-          .set({ deletedAt: null, slug, updatedAt: new Date() })
-          .where(eq(events.id, id))
-          .returning();
+    const [restored] = await this.databaseService.database
+      .update(events)
+      .set({ deletedAt: null, slug, updatedAt: new Date() })
+      .where(eq(events.id, id))
+      .returning();
 
-        if (!updated) {
-          throw new BadRequestException('Falha ao restaurar evento');
-        }
-
-        return updated;
-      },
-    );
+    if (!restored) {
+      throw new BadRequestException('Falha ao restaurar evento');
+    }
 
     await this.auditService.log({
       actorUserId: audit?.actorUserId,
@@ -869,94 +870,90 @@ export class EventsService {
     registrationId: string,
     audit?: AuditContext,
   ) {
-    const result = await this.databaseService.database.transaction(
-      async (tx) => {
-        const [event] = await tx
-          .select({
-            id: events.id,
-            accessMode: events.accessMode,
-            capacity: events.capacity,
-            createdByUserId: events.createdByUserId,
+    const [event] = await this.databaseService.database
+      .select({
+        id: events.id,
+        accessMode: events.accessMode,
+        capacity: events.capacity,
+        createdByUserId: events.createdByUserId,
+      })
+      .from(events)
+      .where(and(eq(events.id, eventId), isNull(events.deletedAt)))
+      .limit(1);
+
+    if (!event) {
+      throw new NotFoundException('Evento nao encontrado');
+    }
+
+    const [registration] = await this.databaseService.database
+      .select()
+      .from(eventRegistrations)
+      .where(
+        and(
+          eq(eventRegistrations.id, registrationId),
+          eq(eventRegistrations.eventId, eventId),
+          isNull(eventRegistrations.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!registration) {
+      throw new NotFoundException('Inscricao nao encontrada');
+    }
+
+    const now = new Date();
+    const before = registration;
+    let cancelled = registration;
+    if (registration.status !== 'cancelled') {
+      const [updated] = await this.databaseService.database
+        .update(eventRegistrations)
+        .set({
+          status: 'cancelled',
+          cancelledAt: now,
+        })
+        .where(eq(eventRegistrations.id, registrationId))
+        .returning();
+      cancelled = updated ?? registration;
+    }
+
+    let promoted: RegistrationRow | null = null;
+    if (
+      registration.status === 'confirmed' &&
+      event.accessMode === 'registered_only' &&
+      event.capacity !== null
+    ) {
+      const [waitlisted] = await this.databaseService.database
+        .select()
+        .from(eventRegistrations)
+        .where(
+          and(
+            eq(eventRegistrations.eventId, eventId),
+            eq(eventRegistrations.status, 'waitlisted'),
+            isNull(eventRegistrations.deletedAt),
+          ),
+        )
+        .orderBy(asc(eventRegistrations.createdAt))
+        .limit(1);
+
+      if (waitlisted) {
+        const [promotedRow] = await this.databaseService.database
+          .update(eventRegistrations)
+          .set({
+            status: 'confirmed',
+            confirmedAt: now,
           })
-          .from(events)
-          .where(and(eq(events.id, eventId), isNull(events.deletedAt)))
-          .limit(1);
+          .where(eq(eventRegistrations.id, waitlisted.id))
+          .returning();
+        promoted = promotedRow ?? waitlisted;
+      }
+    }
 
-        if (!event) {
-          throw new NotFoundException('Evento nao encontrado');
-        }
-
-        const [registration] = await tx
-          .select()
-          .from(eventRegistrations)
-          .where(
-            and(
-              eq(eventRegistrations.id, registrationId),
-              eq(eventRegistrations.eventId, eventId),
-              isNull(eventRegistrations.deletedAt),
-            ),
-          )
-          .limit(1);
-
-        if (!registration) {
-          throw new NotFoundException('Inscricao nao encontrada');
-        }
-
-        const now = new Date();
-        const before = registration;
-        let cancelled = registration;
-        if (registration.status !== 'cancelled') {
-          const [updated] = await tx
-            .update(eventRegistrations)
-            .set({
-              status: 'cancelled',
-              cancelledAt: now,
-            })
-            .where(eq(eventRegistrations.id, registrationId))
-            .returning();
-          cancelled = updated ?? registration;
-        }
-
-        let promoted: RegistrationRow | null = null;
-        if (
-          registration.status === 'confirmed' &&
-          event.accessMode === 'registered_only' &&
-          event.capacity !== null
-        ) {
-          const [waitlisted] = await tx
-            .select()
-            .from(eventRegistrations)
-            .where(
-              and(
-                eq(eventRegistrations.eventId, eventId),
-                eq(eventRegistrations.status, 'waitlisted'),
-                isNull(eventRegistrations.deletedAt),
-              ),
-            )
-            .orderBy(asc(eventRegistrations.createdAt))
-            .limit(1);
-
-          if (waitlisted) {
-            const [promotedRow] = await tx
-              .update(eventRegistrations)
-              .set({
-                status: 'confirmed',
-                confirmedAt: now,
-              })
-              .where(eq(eventRegistrations.id, waitlisted.id))
-              .returning();
-            promoted = promotedRow ?? waitlisted;
-          }
-        }
-
-        return {
-          event,
-          before,
-          cancelled,
-          promoted,
-        };
-      },
-    );
+    const result = {
+      event,
+      before,
+      cancelled,
+      promoted,
+    };
 
     await this.auditService.log({
       actorUserId: audit?.actorUserId,
@@ -1098,6 +1095,7 @@ export class EventsService {
   }
 
   async listPublic(filters?: PublicEventsQueryDto) {
+    await this.ensureBirthdayEventsUpToDate();
     const whereFilters = await this.buildPublishedFilters(filters);
 
     const rows = await this.databaseService.database
@@ -1130,6 +1128,7 @@ export class EventsService {
   }
 
   async listCalendar(filters?: PublicEventsQueryDto) {
+    await this.ensureBirthdayEventsUpToDate();
     const whereFilters = await this.buildPublishedFilters(filters);
 
     return this.databaseService.database
@@ -1267,41 +1266,39 @@ export class EventsService {
       throw new BadRequestException('Email obrigatorio');
     }
 
-    const registration = await this.databaseService.database.transaction(
-      async (tx) => {
-        if (userId) {
-          const [existing] = await tx
-            .select({ id: eventRegistrations.id })
-            .from(eventRegistrations)
-            .where(
-              and(
-                eq(eventRegistrations.eventId, event.id),
-                eq(eventRegistrations.userId, userId),
-                isNull(eventRegistrations.deletedAt),
-              ),
-            )
-            .limit(1);
+    if (userId) {
+      const [existing] = await this.databaseService.database
+        .select({ id: eventRegistrations.id })
+        .from(eventRegistrations)
+        .where(
+          and(
+            eq(eventRegistrations.eventId, event.id),
+            eq(eventRegistrations.userId, userId),
+            isNull(eventRegistrations.deletedAt),
+          ),
+        )
+        .limit(1);
 
-          if (existing) {
-            throw new ConflictException('Inscricao ja existente');
-          }
-        } else if (normalizedEmail) {
-          const [existing] = await tx
-            .select({ id: eventRegistrations.id })
-            .from(eventRegistrations)
-            .where(
-              and(
-                eq(eventRegistrations.eventId, event.id),
-                eq(eventRegistrations.email, normalizedEmail),
-                isNull(eventRegistrations.deletedAt),
-              ),
-            )
-            .limit(1);
+      if (existing) {
+        throw new ConflictException('Inscricao ja existente');
+      }
+    } else if (normalizedEmail) {
+      const [existing] = await this.databaseService.database
+        .select({ id: eventRegistrations.id })
+        .from(eventRegistrations)
+        .where(
+          and(
+            eq(eventRegistrations.eventId, event.id),
+            eq(eventRegistrations.email, normalizedEmail),
+            isNull(eventRegistrations.deletedAt),
+          ),
+        )
+        .limit(1);
 
-          if (existing) {
-            throw new ConflictException('Inscricao ja existente');
-          }
-        }
+      if (existing) {
+        throw new ConflictException('Inscricao ja existente');
+      }
+    }
 
     let status: RegistrationRow['status'] = 'confirmed';
     let confirmedAt: Date | null = new Date();
@@ -1310,7 +1307,7 @@ export class EventsService {
       status = 'pending';
       confirmedAt = null;
     } else if (event.capacity !== null) {
-      const [countRow] = await tx
+      const [countRow] = await this.databaseService.database
         .select({ total: sql<number>`count(*)` })
         .from(eventRegistrations)
         .where(
@@ -1328,35 +1325,38 @@ export class EventsService {
       }
     }
 
-        try {
-          const [created] = await tx
-            .insert(eventRegistrations)
-            .values({
-              eventId: event.id,
-              userId: userId ?? null,
-              name: userId ? null : (normalizedName ?? null),
-              email: userId ? null : (normalizedEmail ?? null),
-              status,
-              confirmedAt,
-            })
-            .returning();
+    let registration: RegistrationRow;
+    try {
+      const [created] = await this.databaseService.database
+        .insert(eventRegistrations)
+        .values({
+          eventId: event.id,
+          userId: userId ?? null,
+          name: userId ? null : (normalizedName ?? null),
+          email: userId ? null : (normalizedEmail ?? null),
+          status,
+          confirmedAt,
+        })
+        .returning();
 
-          if (!created) {
-            throw new BadRequestException('Falha ao registrar inscricao');
-          }
+      if (!created) {
+        throw new BadRequestException('Falha ao registrar inscricao');
+      }
 
-          return created;
-        } catch (error) {
-          if (
-            this.isUniqueViolation(error, REG_USER_UNIQUE_CONSTRAINT) ||
-            this.isUniqueViolation(error, REG_EMAIL_UNIQUE_CONSTRAINT)
-          ) {
-            throw new ConflictException('Inscricao ja existente');
-          }
-          throw error;
-        }
-      },
-    );
+      registration = created;
+    } catch (error) {
+      if (
+        this.isUniqueViolation(error, REG_USER_UNIQUE_CONSTRAINT) ||
+        this.isUniqueViolation(error, REG_EMAIL_UNIQUE_CONSTRAINT)
+      ) {
+        throw new ConflictException('Inscricao ja existente');
+      }
+      throw error;
+    }
+
+    if (registration.userId) {
+      await this.birthdayEventsService.syncForUser(registration.userId);
+    }
 
     if (event.isPaid) {
       await this.notifyPaymentReview(event, registration);
@@ -1417,156 +1417,150 @@ export class EventsService {
       this.databaseService.database,
     );
 
-    const registration = await this.databaseService.database.transaction(
-      async (tx) => {
-        const candidates = await tx
-          .select({
-            id: users.id,
-            email: users.email,
-            cpf: users.cpf,
-            phone: users.phone,
-            name: users.name,
-            active: users.active,
-            role: users.role,
-            planId: users.planId,
-          })
-          .from(users)
-          .where(
-            and(
-              isNull(users.deletedAt),
-              or(
-                eq(users.email, normalizedEmail),
-                eq(users.cpf, normalizedCpf),
-                eq(users.phone, normalizedPhone),
-              ),
-            ),
-          );
+    const candidates = await this.databaseService.database
+      .select({
+        id: users.id,
+        email: users.email,
+        cpf: users.cpf,
+        phone: users.phone,
+        name: users.name,
+        active: users.active,
+        role: users.role,
+        planId: users.planId,
+      })
+      .from(users)
+      .where(
+        and(
+          isNull(users.deletedAt),
+          or(
+            eq(users.email, normalizedEmail),
+            eq(users.cpf, normalizedCpf),
+            eq(users.phone, normalizedPhone),
+          ),
+        ),
+      );
 
-        const uniqueIds = new Set(candidates.map((row) => row.id));
-        if (uniqueIds.size > 1) {
-          throw new BadRequestException(
-            'Email, CPF e telefone ja cadastrados em usuarios diferentes',
-          );
-        }
+    const uniqueIds = new Set(candidates.map((row) => row.id));
+    if (uniqueIds.size > 1) {
+      throw new BadRequestException(
+        'Email, CPF e telefone ja cadastrados em usuarios diferentes',
+      );
+    }
 
-        let userId: string;
-        const existing = candidates[0];
+    let userId: string;
+    const existing = candidates[0];
 
-        if (existing) {
-          if (!existing.active) {
-            throw new BadRequestException('Usuario inativo');
-          }
-          if (existing.email && existing.email.toLowerCase() !== normalizedEmail) {
-            throw new BadRequestException('Email ja cadastrado');
-          }
-          if (existing.cpf && existing.cpf !== normalizedCpf) {
-            throw new BadRequestException('CPF ja cadastrado');
-          }
-          if (existing.phone && existing.phone !== normalizedPhone) {
-            throw new BadRequestException('Telefone ja cadastrado');
-          }
+    if (existing) {
+      if (!existing.active) {
+        throw new BadRequestException('Usuario inativo');
+      }
+      if (existing.email && existing.email.toLowerCase() !== normalizedEmail) {
+        throw new BadRequestException('Email ja cadastrado');
+      }
+      if (existing.cpf && existing.cpf !== normalizedCpf) {
+        throw new BadRequestException('CPF ja cadastrado');
+      }
+      if (existing.phone && existing.phone !== normalizedPhone) {
+        throw new BadRequestException('Telefone ja cadastrado');
+      }
 
-          userId = existing.id;
+      userId = existing.id;
 
-          const updates: Partial<typeof users.$inferInsert> = {};
-          if (!existing.cpf) {
-            updates.cpf = normalizedCpf;
-          }
-          if (!existing.phone) {
-            updates.phone = normalizedPhone;
-          }
-          if (!existing.name && normalizedName) {
-            updates.name = normalizedName;
-          }
-          if (existing.role === 'GUEST' && existing.planId !== guestPlanId) {
-            updates.planId = guestPlanId;
-          }
+      const updates: Partial<typeof users.$inferInsert> = {};
+      if (!existing.cpf) {
+        updates.cpf = normalizedCpf;
+      }
+      if (!existing.phone) {
+        updates.phone = normalizedPhone;
+      }
+      if (!existing.name && normalizedName) {
+        updates.name = normalizedName;
+      }
+      if (existing.role === 'GUEST' && existing.planId !== guestPlanId) {
+        updates.planId = guestPlanId;
+      }
 
-          if (Object.keys(updates).length > 0) {
-            await tx
-              .update(users)
-              .set({ ...updates, updatedAt: new Date() })
-              .where(eq(users.id, userId));
-          }
-        } else {
-          const [created] = await tx
-            .insert(users)
-            .values({
-              email: normalizedEmail,
-              cpf: normalizedCpf,
-              phone: normalizedPhone,
-              name: normalizedName,
-              role: 'GUEST',
-              planId: guestPlanId,
-              active: true,
-            })
-            .returning({ id: users.id });
+      if (Object.keys(updates).length > 0) {
+        await this.databaseService.database
+          .update(users)
+          .set({ ...updates, updatedAt: new Date() })
+          .where(eq(users.id, userId));
+      }
+    } else {
+      const [created] = await this.databaseService.database
+        .insert(users)
+        .values({
+          email: normalizedEmail,
+          cpf: normalizedCpf,
+          phone: normalizedPhone,
+          name: normalizedName,
+          role: 'GUEST',
+          planId: guestPlanId,
+          active: true,
+        })
+        .returning({ id: users.id });
 
-          if (!created) {
-            throw new BadRequestException('Falha ao criar usuario');
-          }
+      if (!created) {
+        throw new BadRequestException('Falha ao criar usuario');
+      }
 
-          userId = created.id;
-        }
+      userId = created.id;
+    }
 
-        const [existingRegistration] = await tx
-          .select({ id: eventRegistrations.id })
-          .from(eventRegistrations)
-          .where(
-            and(
-              eq(eventRegistrations.eventId, event.id),
-              eq(eventRegistrations.userId, userId),
-              isNull(eventRegistrations.deletedAt),
-            ),
-          )
-          .limit(1);
+    const [existingRegistration] = await this.databaseService.database
+      .select({ id: eventRegistrations.id })
+      .from(eventRegistrations)
+      .where(
+        and(
+          eq(eventRegistrations.eventId, event.id),
+          eq(eventRegistrations.userId, userId),
+          isNull(eventRegistrations.deletedAt),
+        ),
+      )
+      .limit(1);
 
-        if (existingRegistration) {
-          throw new ConflictException('Inscricao ja existente');
-        }
+    if (existingRegistration) {
+      throw new ConflictException('Inscricao ja existente');
+    }
 
-        let status: RegistrationRow['status'] = 'confirmed';
-        let confirmedAt: Date | null = new Date();
+    let status: RegistrationRow['status'] = 'confirmed';
+    let confirmedAt: Date | null = new Date();
 
-        if (event.isPaid || event.requiresConfirmation) {
-          status = 'pending';
-          confirmedAt = null;
-        } else if (event.capacity !== null) {
-          const [countRow] = await tx
-            .select({ total: sql<number>`count(*)` })
-            .from(eventRegistrations)
-            .where(
-              and(
-                eq(eventRegistrations.eventId, event.id),
-                eq(eventRegistrations.status, 'confirmed'),
-                isNull(eventRegistrations.deletedAt),
-              ),
-            );
+    if (event.isPaid || event.requiresConfirmation) {
+      status = 'pending';
+      confirmedAt = null;
+    } else if (event.capacity !== null) {
+      const [countRow] = await this.databaseService.database
+        .select({ total: sql<number>`count(*)` })
+        .from(eventRegistrations)
+        .where(
+          and(
+            eq(eventRegistrations.eventId, event.id),
+            eq(eventRegistrations.status, 'confirmed'),
+            isNull(eventRegistrations.deletedAt),
+          ),
+        );
 
-          const confirmedCount = Number(countRow?.total ?? 0);
-          if (confirmedCount >= event.capacity) {
-            status = 'waitlisted';
-            confirmedAt = null;
-          }
-        }
+      const confirmedCount = Number(countRow?.total ?? 0);
+      if (confirmedCount >= event.capacity) {
+        status = 'waitlisted';
+        confirmedAt = null;
+      }
+    }
 
-        const [createdRegistration] = await tx
-          .insert(eventRegistrations)
-          .values({
-            eventId: event.id,
-            userId,
-            status,
-            confirmedAt,
-          })
-          .returning();
+    const [registration] = await this.databaseService.database
+      .insert(eventRegistrations)
+      .values({
+        eventId: event.id,
+        userId,
+        status,
+        confirmedAt,
+      })
+      .returning();
 
-        if (!createdRegistration) {
-          throw new BadRequestException('Falha ao registrar inscricao');
-        }
-
-        return createdRegistration;
-      },
-    );
+    if (!registration) {
+      throw new BadRequestException('Falha ao registrar inscricao');
+    }
 
     if (event.isPaid) {
       await this.notifyPaymentReview(event, registration);

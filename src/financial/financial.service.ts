@@ -5,6 +5,7 @@ import { DatabaseService } from '../db/database.service';
 import { plans } from '../drizzle/schema/plans';
 import { users } from '../drizzle/schema/users';
 import { ensureFreePlanId } from '../plans/plan.utils';
+import { BirthdayEventsService } from '../events/birthday-events.service';
 import {
   expenseTemplates,
   financialExpenses,
@@ -59,6 +60,7 @@ export class FinancialService {
   constructor(
     private readonly databaseService: DatabaseService,
     private readonly auditService: AuditService,
+    private readonly birthdayEventsService: BirthdayEventsService,
   ) {}
 
   private parseDateTime(value?: string | Date | null) {
@@ -412,6 +414,7 @@ export class FinancialService {
       .update(users)
       .set({ planId: plan.id })
       .where(eq(users.id, payload.userId));
+    await this.birthdayEventsService.syncForUser(payload.userId);
 
     await this.auditService.log({
       actorUserId: audit?.actorUserId,
@@ -518,6 +521,7 @@ export class FinancialService {
       .update(users)
       .set({ planId: freePlanId })
       .where(eq(users.id, userId));
+    await this.birthdayEventsService.syncForUser(userId);
 
     await this.auditService.log({
       actorUserId: audit?.actorUserId ?? userId,
@@ -658,6 +662,7 @@ export class FinancialService {
         .update(users)
         .set({ planId: current.planId })
         .where(eq(users.id, current.userId));
+      await this.birthdayEventsService.syncForUser(current.userId);
     }
 
     await this.auditService.log({

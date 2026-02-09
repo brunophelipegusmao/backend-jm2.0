@@ -5,10 +5,11 @@ import { DatabaseModule } from '../db/database.module';
 import { AuditModule } from '../audit/audit.module';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { HealthAdminController } from './health-admin.controller';
+import { BirthdayEventsService } from '../events/birthday-events.service';
 
 @Module({
   imports: [DatabaseModule, AuditModule],
   controllers: [HealthController, HealthAdminController],
-  providers: [HealthService, RolesGuard],
+  providers: [HealthService, RolesGuard, BirthdayEventsService],
 })
 export class HealthModule {}

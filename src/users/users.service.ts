@@ -8,6 +8,8 @@ import { plans } from '../drizzle/schema/plans';
 import { account, users } from '../drizzle/schema/users';
 import { ensureGuestPlanId, ensureMasterPlanId } from '../plans/plan.utils';
 import { FREE_PLAN_SLUGS } from '../common/constants/plans';
+import { MASTER_PLAN_ROLE_SET } from '../common/constants/roles';
+import { BirthdayEventsService } from '../events/birthday-events.service';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { ConvertGuestDto } from './dto/convert-guest.dto';
 import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
@@ -24,6 +26,7 @@ export class UsersService {
     private readonly databaseService: DatabaseService,
     private readonly auditService: AuditService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly birthdayEventsService: BirthdayEventsService,
   ) {}
 
   private buildAuditMetadata(context?: AuditContext) {
@@ -40,10 +43,11 @@ export class UsersService {
     return Object.keys(metadata).length > 0 ? metadata : null;
   }
 
-  getMe(session: { user?: { id?: string } }) {
+  async getMe(session: { user?: { id?: string } }) {
     if (!session?.user?.id) {
       throw new BadRequestException('Sessão inválida');
     }
+    await this.birthdayEventsService.syncForUser(session.user.id);
 
     return this.databaseService.database
       .select({
@@ -85,10 +89,18 @@ export class UsersService {
         active: users.active,
         role: users.role,
         planId: users.planId,
+        birthDate: healthProfiles.birthDate,
         createdAt: users.createdAt,
         updatedAt: users.updatedAt,
       })
       .from(users)
+      .leftJoin(
+        healthProfiles,
+        and(
+          eq(healthProfiles.userId, users.id),
+          isNull(healthProfiles.deletedAt),
+        ),
+      )
       .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1)
       .then((rows) => rows[0] ?? null);
@@ -112,11 +124,19 @@ export class UsersService {
         planId: users.planId,
         planName: plans.name,
         planSlug: plans.slug,
+        birthDate: healthProfiles.birthDate,
         createdAt: users.createdAt,
         updatedAt: users.updatedAt,
       })
       .from(users)
       .leftJoin(plans, eq(users.planId, plans.id))
+      .leftJoin(
+        healthProfiles,
+        and(
+          eq(healthProfiles.userId, users.id),
+          isNull(healthProfiles.deletedAt),
+        ),
+      )
       .where(isNull(users.deletedAt))
       .orderBy(asc(users.name), asc(users.email));
   }
@@ -297,7 +317,7 @@ export class UsersService {
       }
     }
 
-    if (payload.role === 'GUEST') {
+    if (payload.role === 'GUEST' && current.role !== 'GUEST') {
       const phoneNumber = payload.phone ?? current.phone;
       if (!phoneNumber) {
         throw new BadRequestException('Telefone obrigatorio para convidados');
@@ -309,8 +329,8 @@ export class UsersService {
     }
 
     let planIdToApply: string | undefined;
-    const requiresMasterPlan =
-      payload.role === 'MASTER' || payload.role === 'ADMIN';
+    const nextRole = payload.role ?? current.role;
+    const requiresMasterPlan = MASTER_PLAN_ROLE_SET.has(nextRole);
 
     if (requiresMasterPlan) {
       planIdToApply = await ensureMasterPlanId(this.databaseService.database);
@@ -401,6 +421,8 @@ export class UsersService {
       },
     });
 
+    await this.birthdayEventsService.syncForUser(userId);
+
     return result;
   }
 
@@ -449,10 +471,7 @@ export class UsersService {
       .select({ id: users.id })
       .from(users)
       .where(
-        and(
-          eq(users.phone, completeProfileDto.phone),
-          isNull(users.deletedAt),
-        ),
+        and(eq(users.phone, completeProfileDto.phone), isNull(users.deletedAt)),
       )
       .limit(1);
 
@@ -484,6 +503,8 @@ export class UsersService {
       .set(payload)
       .where(and(eq(users.id, session.user.id), isNull(users.deletedAt)))
       .returning();
+
+    await this.birthdayEventsService.syncForUser(session.user.id);
     return user ?? null;
   }
 
@@ -585,6 +606,8 @@ export class UsersService {
       after: result ?? current,
       metadata: this.buildAuditMetadata(audit),
     });
+
+    await this.birthdayEventsService.syncForUser(userId);
 
     return result;
   }

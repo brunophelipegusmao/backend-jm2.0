@@ -3,6 +3,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../db/database.service';
 import { healthMeasurements, healthProfiles } from '../drizzle/schema/health';
+import { BirthdayEventsService } from '../events/birthday-events.service';
 import { CreateHealthDto } from './dto/create-health.dto';
 import { ComputeBodyCompositionDto } from './dto/compute-body-composition.dto';
 import { UpdateHealthDto } from './dto/update-health.dto';
@@ -45,6 +46,7 @@ export class HealthService {
   constructor(
     private readonly databaseService: DatabaseService,
     private readonly auditService: AuditService,
+    private readonly birthdayEventsService: BirthdayEventsService,
   ) {}
 
   private toNumber(value: number | string | null | undefined) {
@@ -384,6 +386,7 @@ export class HealthService {
       })
       .returning();
     await this.recordMeasurement(userId, values);
+    await this.birthdayEventsService.syncForUser(userId);
     return this.attachBmiCategory(profile ?? null);
   }
 
@@ -437,11 +440,28 @@ export class HealthService {
       )
       .limit(1);
 
+    const values = this.buildHealthValues(updateHealthDto);
     if (!current) {
-      throw new BadRequestException('Perfil de saúde não encontrado');
+      if (!updateHealthDto.birthDate) {
+        throw new BadRequestException('Perfil de saúde não encontrado');
+      }
+      const merged = { ...values, birthDate: updateHealthDto.birthDate };
+      const derived = this.computeDerivedFields(merged);
+      const [created] = await this.databaseService.database
+        .insert(healthProfiles)
+        .values({
+          ...values,
+          ...derived,
+          userId,
+          birthDate: updateHealthDto.birthDate,
+        })
+        .returning();
+
+      await this.recordMeasurement(userId, merged);
+      await this.birthdayEventsService.syncForUser(userId);
+      return this.attachBmiCategory(created ?? null);
     }
 
-    const values = this.buildHealthValues(updateHealthDto);
     const merged = { ...current, ...values };
     const derived = this.computeDerivedFields(merged);
 
@@ -461,6 +481,7 @@ export class HealthService {
       .returning();
 
     await this.recordMeasurement(userId, merged);
+    await this.birthdayEventsService.syncForUser(userId);
     return this.attachBmiCategory(profile ?? null);
   }
 
@@ -513,6 +534,7 @@ export class HealthService {
         ),
       )
       .returning();
+    await this.birthdayEventsService.syncForUser(userId);
     return this.attachBmiCategory(profile ?? null);
   }
 
