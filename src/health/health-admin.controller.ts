@@ -82,4 +82,12 @@ export class HealthAdminController {
   ) {
     return this.healthService.computeFromPayload(payload);
   }
+
+  @Post('body-composition/compute')
+  computeBodyCompositionGeneric(
+    @Body(new ZodValidationPipe(computeBodyCompositionSchema))
+    payload: ComputeBodyCompositionDto,
+  ) {
+    return this.healthService.computeFromPayload(payload);
+  }
 }

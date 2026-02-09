@@ -2,7 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../db/database.service';
-import { healthProfiles } from '../drizzle/schema/health';
+import { healthMeasurements, healthProfiles } from '../drizzle/schema/health';
 import { CreateHealthDto } from './dto/create-health.dto';
 import { ComputeBodyCompositionDto } from './dto/compute-body-composition.dto';
 import { UpdateHealthDto } from './dto/update-health.dto';
@@ -28,6 +28,12 @@ type HealthInput = {
   targetBodyFatPercent?: number | string | null;
 };
 
+type HealthMeasurementInput = HealthInput & {
+  bloodType?: string | null;
+  skinfoldSubscapular?: number | string | null;
+  skinfoldMidaxillary?: number | string | null;
+};
+
 type AuditActor = {
   actorUserId: string;
   ip?: string;
@@ -45,13 +51,46 @@ export class HealthService {
     if (value === null || value === undefined) {
       return null;
     }
-    const numeric = typeof value === 'number' ? value : Number(value);
+    const numeric =
+      typeof value === 'number'
+        ? value
+        : Number(String(value).trim().replace(',', '.'));
     return Number.isNaN(numeric) ? null : numeric;
   }
 
   private toNumericString(value: number | string | null | undefined) {
     const numeric = this.toNumber(value);
     return numeric === null ? undefined : numeric.toString();
+  }
+
+  private normalizeHeightCm(value: number | string | null | undefined) {
+    const numeric = this.toNumber(value);
+    if (numeric === null) {
+      return null;
+    }
+    if (numeric > 0 && numeric < 3.5) {
+      return numeric * 100;
+    }
+    return numeric;
+  }
+
+  private normalizeBloodType(value: string | null | undefined) {
+    const allowed = [
+      'A_POSITIVE',
+      'A_NEGATIVE',
+      'B_POSITIVE',
+      'B_NEGATIVE',
+      'AB_POSITIVE',
+      'AB_NEGATIVE',
+      'O_NEGATIVE',
+      'O_POSITIVE',
+    ] as const;
+    if (!value) {
+      return null;
+    }
+    return allowed.includes(value as (typeof allowed)[number])
+      ? (value as (typeof allowed)[number])
+      : null;
   }
 
   private computeAge(birthDate: string | Date) {
@@ -113,7 +152,7 @@ export class HealthService {
   private computeDerivedFields(input: HealthInput) {
     const derived: Record<string, string> = {};
     const weight = this.toNumber(input.weightKg);
-    const height = this.toNumber(input.heightCm);
+    const height = this.normalizeHeightCm(input.heightCm);
 
     if (weight !== null && height !== null && height > 0) {
       const heightM = height / 100;
@@ -180,9 +219,10 @@ export class HealthService {
   }
 
   private buildHealthValues(payload: CreateHealthDto | UpdateHealthDto) {
+    const normalizedHeight = this.normalizeHeightCm(payload.heightCm);
     return {
       ...payload,
-      heightCm: this.toNumericString(payload.heightCm),
+      heightCm: normalizedHeight === null ? undefined : normalizedHeight.toString(),
       weightKg: this.toNumericString(payload.weightKg),
       skinfoldChest: this.toNumericString(payload.skinfoldChest),
       skinfoldAbdomen: this.toNumericString(payload.skinfoldAbdomen),
@@ -219,13 +259,82 @@ export class HealthService {
             thighMm: payload.thighMm,
           };
 
+    const heightCm = this.normalizeHeightCm(payload.heightCm);
     return computeBodyComposition({
       sex,
       age,
       weightKg: payload.weightKg,
-      heightCm: payload.heightCm,
+      heightCm: heightCm === null ? undefined : heightCm,
       skinfolds,
       goalBodyFatPct: payload.goalBodyFatPct,
+    });
+  }
+
+  private hasMeasurementData(input: HealthMeasurementInput) {
+    const fields = [
+      input.heightCm,
+      input.weightKg,
+      input.skinfoldChest,
+      input.skinfoldAbdomen,
+      input.skinfoldThigh,
+      input.skinfoldTriceps,
+      input.skinfoldSubscapular,
+      input.skinfoldSuprailiac,
+      input.skinfoldMidaxillary,
+    ];
+    return fields.some((value) => this.toNumber(value) !== null);
+  }
+
+  private async recordMeasurement(
+    userId: string,
+    input: HealthMeasurementInput,
+  ) {
+    if (!this.hasMeasurementData(input)) {
+      return;
+    }
+
+    const heightCm = this.normalizeHeightCm(input.heightCm);
+    const weightKg = this.toNumber(input.weightKg);
+    const derived = this.computeDerivedFields({
+      ...input,
+      heightCm: heightCm ?? undefined,
+      weightKg: weightKg ?? undefined,
+    });
+    const bmiCategory = this.bmiCategoryForProfile(
+      input.birthDate ?? null,
+      derived.bmi ?? null,
+    );
+    const birthDate =
+      input.birthDate instanceof Date
+        ? input.birthDate.toISOString().slice(0, 10)
+        : input.birthDate ?? null;
+
+    await this.databaseService.database.insert(healthMeasurements).values({
+      userId,
+      recordedAt: new Date(),
+      sex: input.sex ?? null,
+      birthDate,
+      heightCm: heightCm === null ? undefined : heightCm.toString(),
+      weightKg: weightKg === null ? undefined : weightKg.toString(),
+      bloodType: this.normalizeBloodType(input.bloodType),
+      skinfoldChest: this.toNumericString(input.skinfoldChest),
+      skinfoldAbdomen: this.toNumericString(input.skinfoldAbdomen),
+      skinfoldThigh: this.toNumericString(input.skinfoldThigh),
+      skinfoldTriceps: this.toNumericString(input.skinfoldTriceps),
+      skinfoldSubscapular: this.toNumericString(input.skinfoldSubscapular),
+      skinfoldSuprailiac: this.toNumericString(input.skinfoldSuprailiac),
+      skinfoldMidaxillary: this.toNumericString(input.skinfoldMidaxillary),
+      targetBodyFatPercent: this.toNumericString(input.targetBodyFatPercent),
+      bmi: derived.bmi,
+      bmiCategory: bmiCategory ?? null,
+      pollockSum: derived.pollockSum,
+      bodyDensity: derived.bodyDensity,
+      bodyFatPercent: derived.bodyFatPercent,
+      fatMassKg: derived.fatMassKg,
+      leanMassKg: derived.leanMassKg,
+      idealBodyMassKg: derived.idealBodyMassKg,
+      excessMassKg: derived.excessMassKg,
+      kcalDeficit: derived.kcalDeficit,
     });
   }
 
@@ -274,6 +383,7 @@ export class HealthService {
         },
       })
       .returning();
+    await this.recordMeasurement(userId, values);
     return this.attachBmiCategory(profile ?? null);
   }
 
@@ -350,6 +460,7 @@ export class HealthService {
       )
       .returning();
 
+    await this.recordMeasurement(userId, merged);
     return this.attachBmiCategory(profile ?? null);
   }
 

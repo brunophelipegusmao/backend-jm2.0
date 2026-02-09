@@ -10,6 +10,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  index,
   uuid,
 } from 'drizzle-orm/pg-core';
 import { users } from './users';
@@ -116,3 +117,70 @@ export const healthProfilesRelations = relations(healthProfiles, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+export const healthMeasurements = pgTable(
+  'tb_health_measurements',
+  {
+    id: serial('id').primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+
+    sex: sexEnum('sex'),
+    birthDate: date('birth_date'),
+    heightCm: numeric('height_cm', { precision: 5, scale: 2 }),
+    weightKg: numeric('weight_kg', { precision: 6, scale: 2 }),
+    bloodType: bloodTypeEnum('blood_type'),
+
+    skinfoldChest: numeric('skinfold_chest', { precision: 5, scale: 2 }),
+    skinfoldAbdomen: numeric('skinfold_abdomen', { precision: 5, scale: 2 }),
+    skinfoldThigh: numeric('skinfold_thigh', { precision: 5, scale: 2 }),
+    skinfoldTriceps: numeric('skinfold_triceps', { precision: 5, scale: 2 }),
+    skinfoldSubscapular: numeric('skinfold_subscapular', {
+      precision: 5,
+      scale: 2,
+    }),
+    skinfoldSuprailiac: numeric('skinfold_suprailiac', {
+      precision: 5,
+      scale: 2,
+    }),
+    skinfoldMidaxillary: numeric('skinfold_midaxillary', {
+      precision: 5,
+      scale: 2,
+    }),
+    targetBodyFatPercent: numeric('target_body_fat_percent', {
+      precision: 5,
+      scale: 2,
+    }),
+
+    bmi: numeric('bmi', { precision: 6, scale: 2 }),
+    bmiCategory: text('bmi_category'),
+    pollockSum: numeric('pollock_sum', { precision: 6, scale: 2 }),
+    bodyDensity: numeric('body_density', { precision: 7, scale: 4 }),
+    bodyFatPercent: numeric('body_fat_percent', { precision: 5, scale: 2 }),
+    fatMassKg: numeric('fat_mass_kg', { precision: 6, scale: 2 }),
+    leanMassKg: numeric('lean_mass_kg', { precision: 6, scale: 2 }),
+    idealBodyMassKg: numeric('ideal_body_mass_kg', { precision: 6, scale: 2 }),
+    excessMassKg: numeric('excess_mass_kg', { precision: 6, scale: 2 }),
+    kcalDeficit: numeric('kcal_deficit', { precision: 10, scale: 2 }),
+  },
+  (table) => ({
+    userRecordedIdx: index('tb_health_measurements_user_recorded_idx').on(
+      table.userId,
+      table.recordedAt,
+    ),
+  }),
+);
+
+export const healthMeasurementsRelations = relations(
+  healthMeasurements,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [healthMeasurements.userId],
+      references: [users.id],
+    }),
+  }),
+);

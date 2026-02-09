@@ -1098,24 +1098,7 @@ export class EventsService {
   }
 
   async listPublic(filters?: PublicEventsQueryDto) {
-    const whereFilters = [
-      eq(events.isPublished, true),
-      eq(events.status, 'published'),
-      isNull(events.deletedAt),
-    ];
-
-    if (filters?.from) {
-      const from = this.normalizeDateInput(filters.from);
-      if (from) {
-        whereFilters.push(gte(events.date, from));
-      }
-    }
-    if (filters?.to) {
-      const to = this.normalizeDateInput(filters.to);
-      if (to) {
-        whereFilters.push(lte(events.date, to));
-      }
-    }
+    const whereFilters = await this.buildPublishedFilters(filters);
 
     const rows = await this.databaseService.database
       .select({
@@ -1147,24 +1130,7 @@ export class EventsService {
   }
 
   async listCalendar(filters?: PublicEventsQueryDto) {
-    const whereFilters = [
-      eq(events.isPublished, true),
-      eq(events.status, 'published'),
-      isNull(events.deletedAt),
-    ];
-
-    if (filters?.from) {
-      const from = this.normalizeDateInput(filters.from);
-      if (from) {
-        whereFilters.push(gte(events.date, from));
-      }
-    }
-    if (filters?.to) {
-      const to = this.normalizeDateInput(filters.to);
-      if (to) {
-        whereFilters.push(lte(events.date, to));
-      }
-    }
+    const whereFilters = await this.buildPublishedFilters(filters);
 
     return this.databaseService.database
       .select({
@@ -1189,17 +1155,18 @@ export class EventsService {
   }
 
   async getPublicBySlug(slug: string) {
+    const whereFilters: SQL[] = [
+      eq(events.slug, slug),
+      eq(events.isPublished, true),
+      isNull(events.deletedAt),
+    ];
+    if (await this.supportsEventStatusColumn()) {
+      whereFilters.push(eq(events.status, 'published'));
+    }
     const [event] = await this.databaseService.database
       .select()
       .from(events)
-      .where(
-        and(
-          eq(events.slug, slug),
-          eq(events.isPublished, true),
-          eq(events.status, 'published'),
-          isNull(events.deletedAt),
-        ),
-      )
+      .where(and(...whereFilters))
       .limit(1);
 
     if (!event) {
@@ -1221,17 +1188,18 @@ export class EventsService {
     context?: AuditContext,
     userId?: string | null,
   ) {
+    const whereFilters: SQL[] = [
+      eq(events.slug, slug),
+      eq(events.isPublished, true),
+      isNull(events.deletedAt),
+    ];
+    if (await this.supportsEventStatusColumn()) {
+      whereFilters.push(eq(events.status, 'published'));
+    }
     const [event] = await this.databaseService.database
       .select()
       .from(events)
-      .where(
-        and(
-          eq(events.slug, slug),
-          eq(events.isPublished, true),
-          eq(events.status, 'published'),
-          isNull(events.deletedAt),
-        ),
-      )
+      .where(and(...whereFilters))
       .limit(1);
 
     if (!event) {
