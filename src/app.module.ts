@@ -15,6 +15,7 @@ import { PlansModule } from './plans/plans.module';
 import { FinancialModule } from './financial/financial.module';
 import { EventsModule } from './events/events.module';
 import { SystemSettingsModule } from './system-settings/system-settings.module';
+import { MaintenanceModeGuard } from './system-settings/maintenance-mode.guard';
 
 @Module({
   imports: [
@@ -37,6 +38,10 @@ import { SystemSettingsModule } from './system-settings/system-settings.module';
   controllers: [AppController],
   providers: [
     AppService,
+    {
+      provide: APP_GUARD,
+      useClass: MaintenanceModeGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: ProfileCompletionGuard,

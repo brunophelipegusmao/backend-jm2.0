@@ -5,11 +5,13 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { InferModel } from 'drizzle-orm';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { DatabaseService } from '../db/database.service';
 import { systemSettingsTable } from '../drizzle/schema/systemSettings';
 import type { UpdateSystemSettingsDto } from './dto/update-system-settings.dto';
 import { ConfigService } from '@nestjs/config';
+import { CloudinaryService } from '../common/services/cloudinary.service';
+import { users } from '../drizzle/schema/users';
 
 type SystemSettingsRow = InferModel<typeof systemSettingsTable, 'select'>;
 
@@ -55,23 +57,28 @@ const DEFAULT_OPERATING_HOURS: DaySchedule[] = [
 const DEFAULT_MAINTENANCE_ROUTES = ['/contacts', '/checkin'];
 
 const hasMasterRole = (role?: string | string[]) => {
-  if (typeof role === 'string') {
-    return role === 'MASTER';
-  }
-  if (Array.isArray(role)) {
-    return role.includes('MASTER');
-  }
-  return false;
+  const roles = normalizeRoles(role);
+  return roles.includes('MASTER');
 };
 
 const hasAdminRole = (role?: string | string[]) => {
+  const roles = normalizeRoles(role);
+  return roles.includes('ADMIN');
+};
+
+const normalizeRoles = (role?: string | string[]) => {
   if (typeof role === 'string') {
-    return role === 'ADMIN';
+    const normalized = role.trim().toUpperCase();
+    return normalized ? [normalized] : [];
   }
   if (Array.isArray(role)) {
-    return role.includes('ADMIN');
+    return role
+      .map((value) =>
+        typeof value === 'string' ? value.trim().toUpperCase() : '',
+      )
+      .filter((value) => value.length > 0);
   }
-  return false;
+  return [];
 };
 
 const ensureStringArray = (value: unknown): string[] => {
@@ -164,6 +171,7 @@ export class SystemSettingsService {
   constructor(
     private readonly databaseService: DatabaseService,
     private readonly configService: ConfigService,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
 
   async getSettings(): Promise<SystemSettingsResponse> {
@@ -176,18 +184,23 @@ export class SystemSettingsService {
   }
 
   async updateSettings(
+    sessionUserId: string | undefined,
     sessionRole: string | string[] | undefined,
     dto: UpdateSystemSettingsDto,
   ): Promise<SystemSettingsResponse> {
-    if (!hasMasterRole(sessionRole) && !hasAdminRole(sessionRole)) {
+    const actorRole = await this.resolveRole(sessionUserId, sessionRole);
+    const isMaster = hasMasterRole(actorRole);
+    const isAdmin = hasAdminRole(actorRole);
+
+    if (dto.maintenanceMode !== undefined && !isMaster) {
       throw new ForbiddenException(
-        'Somente MASTER ou ADMIN podem editar as configuracoes',
+        'Somente MASTER pode alterar o modo manutenção',
       );
     }
 
-    if (dto.maintenanceMode !== undefined && !hasMasterRole(sessionRole)) {
+    if (!isMaster && !isAdmin) {
       throw new ForbiddenException(
-        'Somente MASTER pode alterar o modo manutenção',
+        'Somente MASTER ou ADMIN podem editar as configuracoes',
       );
     }
 
@@ -254,6 +267,57 @@ export class SystemSettingsService {
       .returning();
 
     return this.format(updated ?? existing);
+  }
+
+  async uploadCarouselImage(
+    sessionUserId: string | undefined,
+    sessionRole: string | string[] | undefined,
+    file: Express.Multer.File,
+  ) {
+    const actorRole = await this.resolveRole(sessionUserId, sessionRole);
+
+    if (!hasMasterRole(actorRole) && !hasAdminRole(actorRole)) {
+      throw new ForbiddenException(
+        'Somente MASTER ou ADMIN podem enviar imagens do carrossel',
+      );
+    }
+
+    const uploaded = await this.cloudinaryService.uploadImage(file.buffer, {
+      folder: 'carousel',
+    });
+    return {
+      imageUrl: uploaded.secureUrl,
+      publicId: uploaded.publicId,
+      width: uploaded.width,
+      height: uploaded.height,
+      bytes: uploaded.bytes,
+      format: uploaded.format,
+    };
+  }
+
+  private async resolveRole(
+    sessionUserId: string | undefined,
+    sessionRole: string | string[] | undefined,
+  ) {
+    const normalizedFromSession = normalizeRoles(sessionRole);
+    if (normalizedFromSession.includes('MASTER')) {
+      return 'MASTER';
+    }
+    if (normalizedFromSession.includes('ADMIN')) {
+      return 'ADMIN';
+    }
+
+    if (!sessionUserId) {
+      return normalizedFromSession[0];
+    }
+
+    const [user] = await this.databaseService.database
+      .select({ role: users.role })
+      .from(users)
+      .where(and(eq(users.id, sessionUserId), isNull(users.deletedAt)))
+      .limit(1);
+
+    return user?.role ?? normalizedFromSession[0];
   }
 
   private async findOne(): Promise<SystemSettingsRow | null> {

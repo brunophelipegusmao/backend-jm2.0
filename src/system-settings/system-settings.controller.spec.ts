@@ -3,6 +3,7 @@ import { SystemSettingsController } from './system-settings.controller';
 import { SystemSettingsService } from './system-settings.service';
 import { DatabaseService } from '../db/database.service';
 import { ConfigService } from '@nestjs/config';
+import { CloudinaryService } from '../common/services/cloudinary.service';
 
 const databaseMock = {
   select: jest.fn(() => databaseMock),
@@ -33,6 +34,10 @@ describe('SystemSettingsController', () => {
         SystemSettingsService,
         { provide: DatabaseService, useValue: { database: databaseMock } },
         { provide: ConfigService, useValue: { get: () => 'test-cloud-name' } },
+        {
+          provide: CloudinaryService,
+          useValue: { uploadImage: jest.fn(), deleteImage: jest.fn() },
+        },
       ],
     }).compile();
 

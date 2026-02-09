@@ -6,10 +6,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary, type UploadApiResponse } from 'cloudinary';
 
-const ALLOWED_FOLDERS = new Set(['events', 'avatars']);
+const ALLOWED_FOLDERS = new Set(['events', 'avatars', 'carousel']);
 
 type UploadImageOptions = {
-  folder: 'events' | 'avatars';
+  folder: 'events' | 'avatars' | 'carousel';
   publicId?: string;
 };
 
