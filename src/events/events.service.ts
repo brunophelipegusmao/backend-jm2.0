@@ -11,16 +11,19 @@ import {
   eq,
   gte,
   ilike,
+  isNotNull,
   isNull,
+  like,
   lte,
+  not,
   or,
   sql,
   type SQL,
 } from 'drizzle-orm';
-import { randomUUID } from 'crypto';
 import { AuditService } from '../audit/audit.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
 import { DatabaseService } from '../db/database.service';
+import { auditLogs } from '../drizzle/schema/audit';
 import { eventRegistrations, events } from '../drizzle/schema/events';
 import { plans } from '../drizzle/schema/plans';
 import { users } from '../drizzle/schema/users';
@@ -32,6 +35,7 @@ import type { EventGuestRegistrationDto } from './dto/event-guest-registration.d
 import type { EventRegistrationDto } from './dto/event-registration.dto';
 import type { ConfirmRegistrationDto } from './dto/confirm-registration.dto';
 import type {
+  PublicBirthdaysQueryDto,
   EventsQueryDto,
   PublicEventsQueryDto,
 } from './dto/events-query.dto';
@@ -49,6 +53,7 @@ type RegistrationRow = typeof eventRegistrations.$inferSelect;
 const SLUG_UNIQUE_CONSTRAINT = 'tb_events_slug_unique';
 const REG_USER_UNIQUE_CONSTRAINT = 'tb_event_registrations_event_user_unique';
 const REG_EMAIL_UNIQUE_CONSTRAINT = 'tb_event_registrations_event_email_unique';
+const BIRTHDAY_EVENT_SLUG_LIKE = 'aniversario-%';
 
 @Injectable()
 export class EventsService {
@@ -63,6 +68,14 @@ export class EventsService {
     await this.birthdayEventsService.syncAllUsersFromHealthIfStale();
   }
 
+  private async ensureBirthdayEventsUpToDateSafe() {
+    try {
+      await this.ensureBirthdayEventsUpToDate();
+    } catch (error) {
+      console.warn('[events] Failed to sync birthday events', error);
+    }
+  }
+
   private eventStatusSupported: boolean | null = null;
 
   private async supportsEventStatusColumn() {
@@ -75,7 +88,7 @@ export class EventsService {
       );
       this.eventStatusSupported = Array.isArray(rows)
         ? rows.length > 0
-        : Boolean((rows as any)?.length);
+        : Boolean(rows?.length);
     } catch {
       this.eventStatusSupported = true;
     }
@@ -83,13 +96,24 @@ export class EventsService {
   }
 
   private async buildPublishedFilters(filters?: PublicEventsQueryDto) {
-    const whereFilters: SQL[] = [
-      eq(events.isPublished, true),
-      isNull(events.deletedAt),
-    ];
+    const whereFilters: SQL[] = [isNull(events.deletedAt)];
+    const includeCancelled = filters?.includeCancelled === true;
 
     if (await this.supportsEventStatusColumn()) {
-      whereFilters.push(eq(events.status, 'published'));
+      if (includeCancelled) {
+        const visibilityFilter = or(
+          and(eq(events.status, 'published'), eq(events.isPublished, true)),
+          and(eq(events.status, 'cancelled'), isNotNull(events.publishedAt)),
+        );
+        if (visibilityFilter) {
+          whereFilters.push(visibilityFilter);
+        }
+      } else {
+        whereFilters.push(eq(events.isPublished, true));
+        whereFilters.push(eq(events.status, 'published'));
+      }
+    } else {
+      whereFilters.push(eq(events.isPublished, true));
     }
 
     if (filters?.from) {
@@ -108,6 +132,18 @@ export class EventsService {
     return whereFilters;
   }
 
+  private resolveBirthdayMonth(monthRef?: string) {
+    if (!monthRef) {
+      return new Date().getMonth() + 1;
+    }
+    const [, monthText] = monthRef.split('-');
+    const month = Number(monthText);
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      throw new BadRequestException('Mes invalido');
+    }
+    return month;
+  }
+
   private buildAuditMetadata(
     context?: AuditContext,
     extra?: Record<string, unknown>,
@@ -120,6 +156,45 @@ export class EventsService {
       metadata.userAgent = context.userAgent;
     }
     return Object.keys(metadata).length > 0 ? metadata : null;
+  }
+
+  private confirmedRegistrationsCountSql() {
+    return sql<number>`(
+      select count(*)::int
+      from ${eventRegistrations}
+      where ${eventRegistrations.eventId} = ${events.id}
+        and ${eventRegistrations.status} = 'confirmed'
+        and ${eventRegistrations.deletedAt} is null
+    )`;
+  }
+
+  private async getConfirmedRegistrationsCount(eventId: string) {
+    const [countRow] = await this.databaseService.database
+      .select({ total: sql<number>`count(*)::int` })
+      .from(eventRegistrations)
+      .where(
+        and(
+          eq(eventRegistrations.eventId, eventId),
+          eq(eventRegistrations.status, 'confirmed'),
+          isNull(eventRegistrations.deletedAt),
+        ),
+      );
+
+    return Number(countRow?.total ?? 0);
+  }
+
+  private async assertCapacityAvailable(
+    eventId: string,
+    capacity: number | null,
+  ) {
+    if (capacity === null) {
+      return;
+    }
+
+    const confirmedCount = await this.getConfirmedRegistrationsCount(eventId);
+    if (confirmedCount >= capacity) {
+      throw new ConflictException('Evento lotado');
+    }
   }
 
   private async notifyPaymentReview(
@@ -161,6 +236,25 @@ export class EventsService {
     if (value === null) {
       return null;
     }
+
+    if (typeof value === 'string') {
+      const directMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+      if (directMatch) {
+        const year = Number(directMatch[1]);
+        const month = Number(directMatch[2]);
+        const day = Number(directMatch[3]);
+        const parsed = new Date(year, month - 1, day);
+        if (
+          parsed.getFullYear() !== year ||
+          parsed.getMonth() !== month - 1 ||
+          parsed.getDate() !== day
+        ) {
+          throw new BadRequestException('Data invalida');
+        }
+        return parsed;
+      }
+    }
+
     const parsed = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(parsed.getTime())) {
       throw new BadRequestException('Data invalida');
@@ -290,10 +384,11 @@ export class EventsService {
             allowGuests: payload.allowGuests,
             requiresConfirmation,
             isPaid: payload.isPaid,
-            priceCents: payload.isPaid ? payload.priceCents ?? null : null,
+            priceCents: payload.isPaid ? (payload.priceCents ?? null) : null,
             paymentMethod: payload.isPaid
-              ? payload.paymentMethod?.trim() ?? null
+              ? (payload.paymentMethod?.trim() ?? null)
               : null,
+            isFeatured: payload.isFeatured ?? false,
             status: 'draft',
             createdByUserId,
           })
@@ -318,6 +413,22 @@ export class EventsService {
       throw new ConflictException('Falha ao gerar slug unico');
     }
 
+    if (created.isFeatured) {
+      await this.databaseService.database
+        .update(events)
+        .set({
+          isFeatured: false,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            isNull(events.deletedAt),
+            eq(events.isFeatured, true),
+            sql`${events.id} <> ${created.id}`,
+          ),
+        );
+    }
+
     await this.auditService.log({
       actorUserId: audit?.actorUserId,
       targetUserId: created.createdByUserId,
@@ -336,7 +447,7 @@ export class EventsService {
   }
 
   async findAll(filters?: EventsQueryDto) {
-    await this.ensureBirthdayEventsUpToDate();
+    await this.ensureBirthdayEventsUpToDateSafe();
     const whereFilters: SQL[] = [];
 
     if (!filters?.includeDeleted) {
@@ -368,7 +479,37 @@ export class EventsService {
       }
     }
 
-    const query = this.databaseService.database.select().from(events);
+    const query = this.databaseService.database
+      .select({
+        id: events.id,
+        title: events.title,
+        slug: events.slug,
+        description: events.description,
+        date: events.date,
+        time: events.time,
+        endTime: events.endTime,
+        location: events.location,
+        hideLocation: events.hideLocation,
+        allowGuests: events.allowGuests,
+        requiresConfirmation: events.requiresConfirmation,
+        isPaid: events.isPaid,
+        priceCents: events.priceCents,
+        paymentMethod: events.paymentMethod,
+        thumbnailPublicId: events.thumbnailPublicId,
+        thumbnailUrl: events.thumbnailUrl,
+        isFeatured: events.isFeatured,
+        status: events.status,
+        isPublished: events.isPublished,
+        publishedAt: events.publishedAt,
+        accessMode: events.accessMode,
+        capacity: events.capacity,
+        createdByUserId: events.createdByUserId,
+        deletedAt: events.deletedAt,
+        createdAt: events.createdAt,
+        updatedAt: events.updatedAt,
+        confirmedRegistrations: this.confirmedRegistrationsCountSql(),
+      })
+      .from(events);
     if (whereFilters.length > 0) {
       return query.where(and(...whereFilters)).orderBy(desc(events.date));
     }
@@ -445,29 +586,38 @@ export class EventsService {
     }
 
     const nextIsPaid = payload.isPaid ?? current.isPaid;
-    const nextRequiresConfirmation =
-      nextIsPaid ? true : payload.requiresConfirmation ?? current.requiresConfirmation;
+    const nextRequiresConfirmation = nextIsPaid
+      ? true
+      : (payload.requiresConfirmation ?? current.requiresConfirmation);
     const nextPaymentMethod =
       payload.paymentMethod !== undefined
-        ? payload.paymentMethod?.trim() ?? null
+        ? (payload.paymentMethod?.trim() ?? null)
         : current.paymentMethod;
     const nextPriceCents =
-      payload.priceCents !== undefined ? payload.priceCents : current.priceCents;
+      payload.priceCents !== undefined
+        ? payload.priceCents
+        : current.priceCents;
 
     if (payload.allowGuests !== undefined) {
       updates.allowGuests = payload.allowGuests;
     }
-    if (payload.requiresConfirmation !== undefined || payload.isPaid !== undefined) {
+    if (
+      payload.requiresConfirmation !== undefined ||
+      payload.isPaid !== undefined
+    ) {
       updates.requiresConfirmation = nextRequiresConfirmation;
     }
     if (payload.isPaid !== undefined) {
       updates.isPaid = payload.isPaid;
     }
     if (payload.priceCents !== undefined || payload.isPaid !== undefined) {
-      updates.priceCents = nextIsPaid ? nextPriceCents ?? null : null;
+      updates.priceCents = nextIsPaid ? (nextPriceCents ?? null) : null;
     }
     if (payload.paymentMethod !== undefined || payload.isPaid !== undefined) {
       updates.paymentMethod = nextIsPaid ? nextPaymentMethod : null;
+    }
+    if (payload.isFeatured !== undefined) {
+      updates.isFeatured = payload.isFeatured;
     }
 
     if (nextIsPaid) {
@@ -486,6 +636,22 @@ export class EventsService {
       .returning();
 
     const result = updated ?? current;
+
+    if (result.isFeatured) {
+      await this.databaseService.database
+        .update(events)
+        .set({
+          isFeatured: false,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            isNull(events.deletedAt),
+            eq(events.isFeatured, true),
+            sql`${events.id} <> ${result.id}`,
+          ),
+        );
+    }
 
     await this.auditService.log({
       actorUserId: audit?.actorUserId,
@@ -510,6 +676,28 @@ export class EventsService {
 
     if (!current) {
       throw new NotFoundException('Evento nao encontrado');
+    }
+
+    const [publishLog] = await this.databaseService.database
+      .select({ id: auditLogs.id })
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.entity, 'events'),
+          eq(auditLogs.entityId, id),
+          eq(auditLogs.action, 'published'),
+        ),
+      )
+      .limit(1);
+
+    const wasPublishedAtLeastOnce =
+      current.status === 'published' ||
+      current.isPublished ||
+      Boolean(current.publishedAt) ||
+      Boolean(publishLog);
+
+    if (wasPublishedAtLeastOnce) {
+      return this.cancel(id, audit);
     }
 
     const [removed] = await this.databaseService.database
@@ -665,7 +853,6 @@ export class EventsService {
       .update(events)
       .set({
         isPublished: false,
-        publishedAt: null,
         status: 'draft',
         updatedAt: new Date(),
       })
@@ -708,7 +895,6 @@ export class EventsService {
       .set({
         status: 'cancelled',
         isPublished: false,
-        publishedAt: null,
         updatedAt: new Date(),
       })
       .where(and(eq(events.id, id), isNull(events.deletedAt)))
@@ -750,7 +936,6 @@ export class EventsService {
       .set({
         status: 'draft',
         isPublished: false,
-        publishedAt: null,
         updatedAt: new Date(),
       })
       .where(and(eq(events.id, id), isNull(events.deletedAt)))
@@ -848,6 +1033,8 @@ export class EventsService {
         userId: eventRegistrations.userId,
         name: eventRegistrations.name,
         email: eventRegistrations.email,
+        userName: users.name,
+        userEmail: users.email,
         confirmedByUserId: eventRegistrations.confirmedByUserId,
         paymentMethod: eventRegistrations.paymentMethod,
         paymentAmountCents: eventRegistrations.paymentAmountCents,
@@ -856,6 +1043,7 @@ export class EventsService {
         createdAt: eventRegistrations.createdAt,
       })
       .from(eventRegistrations)
+      .leftJoin(users, eq(eventRegistrations.userId, users.id))
       .where(
         and(
           eq(eventRegistrations.eventId, eventId),
@@ -1025,8 +1213,7 @@ export class EventsService {
       throw new BadRequestException('Inscricao cancelada');
     }
 
-    const paymentMethod =
-      payload.paymentMethod ?? event.paymentMethod ?? null;
+    const paymentMethod = payload.paymentMethod ?? event.paymentMethod ?? null;
     const paymentAmountCents =
       payload.paymentAmountCents ?? event.priceCents ?? null;
 
@@ -1095,15 +1282,19 @@ export class EventsService {
   }
 
   async listPublic(filters?: PublicEventsQueryDto) {
-    await this.ensureBirthdayEventsUpToDate();
+    await this.ensureBirthdayEventsUpToDateSafe();
     const whereFilters = await this.buildPublishedFilters(filters);
+    whereFilters.push(not(like(events.slug, BIRTHDAY_EVENT_SLUG_LIKE)));
 
     const rows = await this.databaseService.database
       .select({
+        id: events.id,
         title: events.title,
         slug: events.slug,
         description: events.description,
         date: events.date,
+        status: events.status,
+        isFeatured: events.isFeatured,
         time: events.time,
         endTime: events.endTime,
         location: events.location,
@@ -1116,6 +1307,7 @@ export class EventsService {
         isPaid: events.isPaid,
         priceCents: events.priceCents,
         paymentMethod: events.paymentMethod,
+        confirmedRegistrations: this.confirmedRegistrationsCountSql(),
       })
       .from(events)
       .where(and(...whereFilters))
@@ -1127,15 +1319,90 @@ export class EventsService {
     }));
   }
 
-  async listCalendar(filters?: PublicEventsQueryDto) {
-    await this.ensureBirthdayEventsUpToDate();
+  async listPublicCards(filters?: PublicEventsQueryDto) {
+    await this.ensureBirthdayEventsUpToDateSafe();
     const whereFilters = await this.buildPublishedFilters(filters);
+    whereFilters.push(not(like(events.slug, BIRTHDAY_EVENT_SLUG_LIKE)));
+
+    const rows = await this.databaseService.database
+      .select({
+        id: events.id,
+        title: events.title,
+        slug: events.slug,
+        description: events.description,
+        date: events.date,
+        status: events.status,
+        isFeatured: events.isFeatured,
+        time: events.time,
+        endTime: events.endTime,
+        location: events.location,
+        hideLocation: events.hideLocation,
+        thumbnailUrl: events.thumbnailUrl,
+        accessMode: events.accessMode,
+        capacity: events.capacity,
+        allowGuests: events.allowGuests,
+        isPaid: events.isPaid,
+        priceCents: events.priceCents,
+        confirmedRegistrations: this.confirmedRegistrationsCountSql(),
+      })
+      .from(events)
+      .where(and(...whereFilters))
+      .orderBy(asc(events.date), asc(events.time));
+
+    return rows.map((event) => ({
+      ...event,
+      location: event.hideLocation ? null : event.location,
+      path: `/events/event-${event.slug}`,
+    }));
+  }
+
+  async listPublicBirthdays(filters?: PublicBirthdaysQueryDto) {
+    await this.ensureBirthdayEventsUpToDateSafe();
+    const whereFilters = await this.buildPublishedFilters();
+    const targetMonth = this.resolveBirthdayMonth(filters?.month);
+
+    whereFilters.push(like(events.slug, BIRTHDAY_EVENT_SLUG_LIKE));
+    whereFilters.push(
+      sql`extract(month from ${events.date}::date) = ${targetMonth}`,
+    );
+
+    const rows = await this.databaseService.database
+      .select({
+        title: events.title,
+        slug: events.slug,
+        description: events.description,
+        date: events.date,
+        time: events.time,
+        endTime: events.endTime,
+        location: events.location,
+        hideLocation: events.hideLocation,
+        thumbnailUrl: events.thumbnailUrl,
+      })
+      .from(events)
+      .where(and(...whereFilters))
+      .orderBy(
+        sql`extract(day from ${events.date}::date) asc`,
+        asc(events.time),
+      );
+
+    return rows.map((event) => ({
+      ...event,
+      location: event.hideLocation ? null : event.location,
+      path: `/events/event-${event.slug}`,
+    }));
+  }
+
+  async listCalendar(filters?: PublicEventsQueryDto) {
+    await this.ensureBirthdayEventsUpToDateSafe();
+    const whereFilters = await this.buildPublishedFilters(filters);
+    whereFilters.push(not(like(events.slug, BIRTHDAY_EVENT_SLUG_LIKE)));
 
     return this.databaseService.database
       .select({
         id: events.id,
         title: events.title,
         slug: events.slug,
+        isFeatured: events.isFeatured,
         date: events.date,
         time: events.time,
         endTime: events.endTime,
@@ -1147,6 +1414,7 @@ export class EventsService {
         isPaid: events.isPaid,
         priceCents: events.priceCents,
         paymentMethod: events.paymentMethod,
+        confirmedRegistrations: this.confirmedRegistrationsCountSql(),
       })
       .from(events)
       .where(and(...whereFilters))
@@ -1163,7 +1431,35 @@ export class EventsService {
       whereFilters.push(eq(events.status, 'published'));
     }
     const [event] = await this.databaseService.database
-      .select()
+      .select({
+        id: events.id,
+        title: events.title,
+        slug: events.slug,
+        description: events.description,
+        date: events.date,
+        time: events.time,
+        endTime: events.endTime,
+        location: events.location,
+        hideLocation: events.hideLocation,
+        allowGuests: events.allowGuests,
+        requiresConfirmation: events.requiresConfirmation,
+        isPaid: events.isPaid,
+        priceCents: events.priceCents,
+        paymentMethod: events.paymentMethod,
+        thumbnailPublicId: events.thumbnailPublicId,
+        thumbnailUrl: events.thumbnailUrl,
+        isFeatured: events.isFeatured,
+        status: events.status,
+        isPublished: events.isPublished,
+        publishedAt: events.publishedAt,
+        accessMode: events.accessMode,
+        capacity: events.capacity,
+        createdByUserId: events.createdByUserId,
+        deletedAt: events.deletedAt,
+        createdAt: events.createdAt,
+        updatedAt: events.updatedAt,
+        confirmedRegistrations: this.confirmedRegistrationsCountSql(),
+      })
       .from(events)
       .where(and(...whereFilters))
       .limit(1);
@@ -1209,11 +1505,14 @@ export class EventsService {
       throw new BadRequestException('Evento aberto, nao requer inscricao');
     }
 
+    let authenticatedEmail: string | null = null;
+
     if (userId) {
       const [userPlan] = await this.databaseService.database
         .select({
           role: users.role,
           active: users.active,
+          email: users.email,
           planSlug: plans.slug,
         })
         .from(users)
@@ -1232,23 +1531,9 @@ export class EventsService {
         throw new BadRequestException('Evento exclusivo para alunos');
       }
 
-      if (!isGuest && !event.isPaid && !event.requiresConfirmation) {
-        const now = new Date();
-        return {
-          id: randomUUID(),
-          eventId: event.id,
-          userId,
-          name: null,
-          email: null,
-          confirmedByUserId: null,
-          paymentMethod: null,
-          paymentAmountCents: null,
-          status: 'confirmed',
-          confirmedAt: now,
-          cancelledAt: null,
-          deletedAt: null,
-          createdAt: now,
-        } satisfies RegistrationRow;
+      authenticatedEmail = userPlan.email?.trim().toLowerCase() ?? null;
+      if (!authenticatedEmail) {
+        throw new BadRequestException('Email do usuario invalido');
       }
     } else {
       if (!event.allowGuests) {
@@ -1266,39 +1551,40 @@ export class EventsService {
       throw new BadRequestException('Email obrigatorio');
     }
 
-    if (userId) {
-      const [existing] = await this.databaseService.database
-        .select({ id: eventRegistrations.id })
-        .from(eventRegistrations)
-        .where(
-          and(
-            eq(eventRegistrations.eventId, event.id),
-            eq(eventRegistrations.userId, userId),
-            isNull(eventRegistrations.deletedAt),
-          ),
-        )
-        .limit(1);
-
-      if (existing) {
-        throw new ConflictException('Inscricao ja existente');
-      }
-    } else if (normalizedEmail) {
-      const [existing] = await this.databaseService.database
-        .select({ id: eventRegistrations.id })
-        .from(eventRegistrations)
-        .where(
-          and(
-            eq(eventRegistrations.eventId, event.id),
-            eq(eventRegistrations.email, normalizedEmail),
-            isNull(eventRegistrations.deletedAt),
-          ),
-        )
-        .limit(1);
-
-      if (existing) {
-        throw new ConflictException('Inscricao ja existente');
-      }
+    const registrationEmail = userId
+      ? authenticatedEmail
+      : (normalizedEmail ?? null);
+    if (!registrationEmail) {
+      throw new BadRequestException('Email obrigatorio');
     }
+
+    const duplicateFilters: SQL[] = [
+      eq(eventRegistrations.eventId, event.id),
+      isNull(eventRegistrations.deletedAt),
+    ];
+    if (userId) {
+      const duplicateByUserOrEmail = or(
+        eq(eventRegistrations.userId, userId),
+        eq(eventRegistrations.email, registrationEmail),
+      );
+      if (duplicateByUserOrEmail) {
+        duplicateFilters.push(duplicateByUserOrEmail);
+      }
+    } else {
+      duplicateFilters.push(eq(eventRegistrations.email, registrationEmail));
+    }
+
+    const [existing] = await this.databaseService.database
+      .select({ id: eventRegistrations.id })
+      .from(eventRegistrations)
+      .where(and(...duplicateFilters))
+      .limit(1);
+
+    if (existing) {
+      throw new ConflictException('Inscricao ja existente');
+    }
+
+    await this.assertCapacityAvailable(event.id, event.capacity);
 
     let status: RegistrationRow['status'] = 'confirmed';
     let confirmedAt: Date | null = new Date();
@@ -1306,23 +1592,6 @@ export class EventsService {
     if (event.isPaid || event.requiresConfirmation) {
       status = 'pending';
       confirmedAt = null;
-    } else if (event.capacity !== null) {
-      const [countRow] = await this.databaseService.database
-        .select({ total: sql<number>`count(*)` })
-        .from(eventRegistrations)
-        .where(
-          and(
-            eq(eventRegistrations.eventId, event.id),
-            eq(eventRegistrations.status, 'confirmed'),
-            isNull(eventRegistrations.deletedAt),
-          ),
-        );
-
-      const confirmedCount = Number(countRow?.total ?? 0);
-      if (confirmedCount >= event.capacity) {
-        status = 'waitlisted';
-        confirmedAt = null;
-      }
     }
 
     let registration: RegistrationRow;
@@ -1333,7 +1602,7 @@ export class EventsService {
           eventId: event.id,
           userId: userId ?? null,
           name: userId ? null : (normalizedName ?? null),
-          email: userId ? null : (normalizedEmail ?? null),
+          email: registrationEmail,
           status,
           confirmedAt,
         })
@@ -1407,15 +1676,14 @@ export class EventsService {
     if (!event.allowGuests) {
       throw new BadRequestException('Evento exclusivo para alunos');
     }
+    await this.assertCapacityAvailable(event.id, event.capacity);
 
     const normalizedEmail = payload.email.trim().toLowerCase();
     const normalizedCpf = payload.cpf.replace(/\D/g, '');
     const normalizedPhone = payload.phone.trim();
     const normalizedName = payload.name?.trim() || null;
 
-    const guestPlanId = await ensureGuestPlanId(
-      this.databaseService.database,
-    );
+    const guestPlanId = await ensureGuestPlanId(this.databaseService.database);
 
     const candidates = await this.databaseService.database
       .select({
@@ -1513,7 +1781,10 @@ export class EventsService {
       .where(
         and(
           eq(eventRegistrations.eventId, event.id),
-          eq(eventRegistrations.userId, userId),
+          or(
+            eq(eventRegistrations.userId, userId),
+            eq(eventRegistrations.email, normalizedEmail),
+          ),
           isNull(eventRegistrations.deletedAt),
         ),
       )
@@ -1529,37 +1800,35 @@ export class EventsService {
     if (event.isPaid || event.requiresConfirmation) {
       status = 'pending';
       confirmedAt = null;
-    } else if (event.capacity !== null) {
-      const [countRow] = await this.databaseService.database
-        .select({ total: sql<number>`count(*)` })
-        .from(eventRegistrations)
-        .where(
-          and(
-            eq(eventRegistrations.eventId, event.id),
-            eq(eventRegistrations.status, 'confirmed'),
-            isNull(eventRegistrations.deletedAt),
-          ),
-        );
-
-      const confirmedCount = Number(countRow?.total ?? 0);
-      if (confirmedCount >= event.capacity) {
-        status = 'waitlisted';
-        confirmedAt = null;
-      }
     }
 
-    const [registration] = await this.databaseService.database
-      .insert(eventRegistrations)
-      .values({
-        eventId: event.id,
-        userId,
-        status,
-        confirmedAt,
-      })
-      .returning();
+    let registration: RegistrationRow;
+    try {
+      const [created] = await this.databaseService.database
+        .insert(eventRegistrations)
+        .values({
+          eventId: event.id,
+          userId,
+          name: normalizedName,
+          email: normalizedEmail,
+          status,
+          confirmedAt,
+        })
+        .returning();
 
-    if (!registration) {
-      throw new BadRequestException('Falha ao registrar inscricao');
+      if (!created) {
+        throw new BadRequestException('Falha ao registrar inscricao');
+      }
+
+      registration = created;
+    } catch (error) {
+      if (
+        this.isUniqueViolation(error, REG_USER_UNIQUE_CONSTRAINT) ||
+        this.isUniqueViolation(error, REG_EMAIL_UNIQUE_CONSTRAINT)
+      ) {
+        throw new ConflictException('Inscricao ja existente');
+      }
+      throw error;
     }
 
     if (event.isPaid) {

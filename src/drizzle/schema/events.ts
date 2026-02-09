@@ -53,6 +53,7 @@ export const events = pgTable(
     paymentMethod: varchar('payment_method', { length: 60 }),
     thumbnailPublicId: varchar('thumbnail_public_id', { length: 140 }),
     thumbnailUrl: varchar('thumbnail_url', { length: 500 }),
+    isFeatured: boolean('is_featured').notNull().default(false),
     status: eventStatus('status').notNull().default('draft'),
     isPublished: boolean('is_published').notNull().default(false),
     publishedAt: timestamp('published_at', { withTimezone: true }),

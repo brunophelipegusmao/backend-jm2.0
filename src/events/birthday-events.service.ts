@@ -19,6 +19,8 @@ const ELIGIBLE_BIRTHDAY_ROLES = new Set([
 const BIRTHDAY_EVENT_TIME = '08:00';
 const BIRTHDAY_EVENT_LOCATION = 'Academia JM';
 const BIRTHDAY_SYNC_INTERVAL_MS = 60_000;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class BirthdayEventsService {
@@ -36,7 +38,10 @@ export class BirthdayEventsService {
       return null;
     }
     const userId = slug.slice(prefix.length).trim();
-    return userId.length > 0 ? userId : null;
+    if (!UUID_REGEX.test(userId)) {
+      return null;
+    }
+    return userId;
   }
 
   private toDateKey(value: Date) {
@@ -176,7 +181,6 @@ export class BirthdayEventsService {
       .set({
         deletedAt: new Date(),
         isPublished: false,
-        publishedAt: null,
         status: 'cancelled',
         updatedAt: new Date(),
       })
@@ -307,7 +311,14 @@ export class BirthdayEventsService {
       }
 
       for (const userId of ids) {
-        await this.syncForUser(userId);
+        try {
+          await this.syncForUser(userId);
+        } catch (error) {
+          console.warn(
+            `[events] Birthday sync skipped for user ${userId}`,
+            error,
+          );
+        }
       }
       this.lastFullSyncAt = Date.now();
     })().finally(() => {

@@ -27,6 +27,7 @@ const baseEventSchema = z.object({
   isPaid: z.boolean(),
   priceCents: z.number().int().min(1).optional().nullable(),
   paymentMethod: z.string().trim().min(2).max(60).optional().nullable(),
+  isFeatured: z.boolean().optional(),
 });
 
 export const createEventSchema = baseEventSchema.superRefine((data, ctx) => {

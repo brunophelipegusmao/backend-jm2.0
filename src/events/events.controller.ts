@@ -22,6 +22,7 @@ import {
 } from '@thallesp/nestjs-better-auth';
 import type { Request } from 'express';
 import { z } from 'zod';
+import { auth } from '../auth';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
@@ -41,8 +42,10 @@ import {
 } from './dto/event-guest-registration.dto';
 import {
   EventsQueryDto,
+  PublicBirthdaysQueryDto,
   PublicEventsQueryDto,
   eventsQuerySchema,
+  publicBirthdaysQuerySchema,
   publicEventsQuerySchema,
 } from './dto/events-query.dto';
 import { UpdateEventDto, updateEventSchema } from './dto/update-event.dto';
@@ -74,6 +77,37 @@ const parseQuery = <T>(
 @Controller('events')
 export class EventsController {
   constructor(private readonly eventsService: EventsService) {}
+
+  private async resolveSessionUserId(
+    session: UserSession | undefined,
+    request?: Request,
+  ) {
+    if (session?.user?.id) {
+      return session.user.id;
+    }
+    if (!request) {
+      return null;
+    }
+
+    try {
+      const headers = new Headers();
+      for (const [key, value] of Object.entries(request.headers)) {
+        if (Array.isArray(value)) {
+          headers.set(key, value.join(','));
+          continue;
+        }
+        if (typeof value === 'string') {
+          headers.set(key, value);
+        }
+      }
+      const resolved = (await auth.api.getSession({ headers })) as {
+        user?: { id?: string };
+      } | null;
+      return resolved?.user?.id ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   private requireUserId(session: UserSession | undefined) {
     const userId = session?.user?.id;
@@ -118,6 +152,30 @@ export class EventsController {
     return this.eventsService.listCalendar(filters);
   }
 
+  @Get('public/cards')
+  @AllowAnonymous()
+  listPublicCards(
+    @Query() query: Record<string, string | string[] | undefined>,
+  ) {
+    const filters = parseQuery<PublicEventsQueryDto>(
+      publicEventsQuerySchema,
+      query,
+    );
+    return this.eventsService.listPublicCards(filters);
+  }
+
+  @Get('public/birthdays')
+  @AllowAnonymous()
+  listPublicBirthdays(
+    @Query() query: Record<string, string | string[] | undefined>,
+  ) {
+    const filters = parseQuery<PublicBirthdaysQueryDto>(
+      publicBirthdaysQuerySchema,
+      query,
+    );
+    return this.eventsService.listPublicBirthdays(filters);
+  }
+
   @Get('public/:slug')
   @AllowAnonymous()
   getPublicEvent(@Param('slug') slug: string) {
@@ -126,14 +184,14 @@ export class EventsController {
 
   @Post('public/:slug/register')
   @AllowAnonymous()
-  registerPublic(
+  async registerPublic(
     @Param('slug') slug: string,
     @Body(new ZodValidationPipe(eventRegistrationSchema))
     payload: EventRegistrationDto,
     @Session() session?: UserSession,
     @Req() request?: Request,
   ) {
-    const userId = session?.user?.id;
+    const userId = await this.resolveSessionUserId(session, request);
     const userAgentHeader = request?.headers['user-agent'];
     return this.eventsService.registerPublic(
       slug,
@@ -318,14 +376,14 @@ export class EventsController {
   }
 
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('MASTER', 'ADMIN', 'STAFF')
+  @Roles('MASTER', 'ADMIN', 'STAFF', 'COACH')
   @Get(':id/registrations')
   listRegistrations(@Param('id') id: string) {
     return this.eventsService.listRegistrations(id);
   }
 
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('MASTER', 'ADMIN', 'STAFF')
+  @Roles('MASTER', 'ADMIN', 'STAFF', 'COACH')
   @Post(':id/registrations/:registrationId/cancel')
   cancelRegistration(
     @Param('id') id: string,
@@ -341,7 +399,7 @@ export class EventsController {
   }
 
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('MASTER', 'ADMIN', 'STAFF')
+  @Roles('MASTER', 'ADMIN', 'STAFF', 'COACH')
   @Post(':id/registrations/:registrationId/confirm')
   confirmRegistration(
     @Param('id') id: string,

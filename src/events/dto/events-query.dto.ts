@@ -33,6 +33,18 @@ export type EventsQueryDto = z.infer<typeof eventsQuerySchema>;
 export const publicEventsQuerySchema = z.object({
   from: dateString.optional(),
   to: dateString.optional(),
+  includeCancelled: optionalBoolean,
 });
 
 export type PublicEventsQueryDto = z.infer<typeof publicEventsQuerySchema>;
+
+export const publicBirthdaysQuerySchema = z.object({
+  month: z
+    .string()
+    .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Mes invalido')
+    .optional(),
+});
+
+export type PublicBirthdaysQueryDto = z.infer<
+  typeof publicBirthdaysQuerySchema
+>;

@@ -1,0 +1,1 @@
+ALTER TABLE "tb_events" ADD COLUMN "is_featured" boolean DEFAULT false NOT NULL;
