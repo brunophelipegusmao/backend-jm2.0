@@ -24,6 +24,11 @@ import {
   completeProfileSchema,
 } from './dto/complete-profile.dto';
 import { ConvertGuestDto, convertGuestSchema } from './dto/convert-guest.dto';
+import { UpdateMeDto, updateMeSchema } from './dto/update-me.dto';
+import {
+  CreatePlanRequestDto,
+  createPlanRequestSchema,
+} from './dto/create-plan-request.dto';
 
 @Controller('users')
 @UseGuards(AuthGuard)
@@ -50,6 +55,30 @@ export class UsersController {
     return this.usersService.getProfileStatus({
       user: { id: this.requireUserId(session) },
     });
+  }
+
+  @Patch('me')
+  updateMe(
+    @Session() session: UserSession,
+    @Body(new ZodValidationPipe(updateMeSchema))
+    payload: UpdateMeDto,
+  ) {
+    return this.usersService.updateMe(
+      { user: { id: this.requireUserId(session) } },
+      payload,
+    );
+  }
+
+  @Post('me/plan-requests')
+  createPlanRequest(
+    @Session() session: UserSession,
+    @Body(new ZodValidationPipe(createPlanRequestSchema))
+    payload: CreatePlanRequestDto,
+  ) {
+    return this.usersService.createPlanRequest(
+      { user: { id: this.requireUserId(session) } },
+      payload,
+    );
   }
 
   @Patch('me/profile')

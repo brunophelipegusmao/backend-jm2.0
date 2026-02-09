@@ -247,6 +247,12 @@ export class EventsController {
     return this.eventsService.findAll(filters);
   }
 
+  @UseGuards(AuthGuard)
+  @Get('me/registrations')
+  listMyRegistrations(@Session() session: UserSession) {
+    return this.eventsService.listMyRegistrations(this.requireUserId(session));
+  }
+
   @UseGuards(AuthGuard, RolesGuard)
   @Roles('MASTER', 'ADMIN', 'STAFF')
   @Get(':id')

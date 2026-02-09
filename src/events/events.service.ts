@@ -1281,6 +1281,57 @@ export class EventsService {
     return result;
   }
 
+  async listMyRegistrations(userId: string) {
+    await this.ensureBirthdayEventsUpToDateSafe();
+
+    const rows = await this.databaseService.database
+      .select({
+        registrationId: eventRegistrations.id,
+        registrationStatus: eventRegistrations.status,
+        registrationCreatedAt: eventRegistrations.createdAt,
+        confirmedAt: eventRegistrations.confirmedAt,
+        cancelledAt: eventRegistrations.cancelledAt,
+        paymentMethod: eventRegistrations.paymentMethod,
+        paymentAmountCents: eventRegistrations.paymentAmountCents,
+        id: events.id,
+        title: events.title,
+        slug: events.slug,
+        description: events.description,
+        date: events.date,
+        time: events.time,
+        endTime: events.endTime,
+        location: events.location,
+        hideLocation: events.hideLocation,
+        thumbnailUrl: events.thumbnailUrl,
+        status: events.status,
+        isPublished: events.isPublished,
+        accessMode: events.accessMode,
+        capacity: events.capacity,
+        allowGuests: events.allowGuests,
+        requiresConfirmation: events.requiresConfirmation,
+        isPaid: events.isPaid,
+        priceCents: events.priceCents,
+        confirmedRegistrations: this.confirmedRegistrationsCountSql(),
+      })
+      .from(eventRegistrations)
+      .innerJoin(events, eq(eventRegistrations.eventId, events.id))
+      .where(
+        and(
+          eq(eventRegistrations.userId, userId),
+          isNull(eventRegistrations.deletedAt),
+          isNull(events.deletedAt),
+          not(like(events.slug, BIRTHDAY_EVENT_SLUG_LIKE)),
+        ),
+      )
+      .orderBy(desc(events.date), desc(events.time), desc(events.createdAt));
+
+    return rows.map((row) => ({
+      ...row,
+      location: row.hideLocation ? null : row.location,
+      path: `/events/event-${row.slug}`,
+    }));
+  }
+
   async listPublic(filters?: PublicEventsQueryDto) {
     await this.ensureBirthdayEventsUpToDateSafe();
     const whereFilters = await this.buildPublishedFilters(filters);

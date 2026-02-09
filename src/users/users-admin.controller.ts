@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Patch,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -18,6 +19,10 @@ import {
   updateUserAdminSchema,
 } from './dto/update-user-admin.dto';
 import { UsersService } from './users.service';
+import {
+  ReviewPlanRequestDto,
+  reviewPlanRequestSchema,
+} from './dto/review-plan-request.dto';
 
 @Controller('admin/users')
 @UseGuards(AuthGuard, RolesGuard)
@@ -33,6 +38,19 @@ export class UsersAdminController {
     return userId;
   }
 
+  @Get('plan-requests')
+  listPlanRequests(
+    @Query('status')
+    status?: 'all' | 'pending' | 'approved' | 'rejected',
+  ) {
+    return this.usersService.listPlanRequestsForAdmin({
+      status:
+        status === 'pending' || status === 'approved' || status === 'rejected'
+          ? status
+      : 'all',
+    });
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.usersService.getByIdForAdmin(id);
@@ -41,6 +59,20 @@ export class UsersAdminController {
   @Get()
   findAll() {
     return this.usersService.listForAdmin();
+  }
+
+  @Patch('plan-requests/:id/review')
+  reviewPlanRequest(
+    @Param('id') id: string,
+    @Session() session: UserSession,
+    @Body(new ZodValidationPipe(reviewPlanRequestSchema))
+    payload: ReviewPlanRequestDto,
+  ) {
+    return this.usersService.reviewPlanRequestByAdmin(
+      id,
+      payload,
+      this.requireUserId(session),
+    );
   }
 
   @Patch(':id')
