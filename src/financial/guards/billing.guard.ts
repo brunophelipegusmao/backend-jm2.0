@@ -14,7 +14,7 @@ import {
 } from '../../drizzle/schema/financial';
 import { plans } from '../../drizzle/schema/plans';
 import { users } from '../../drizzle/schema/users';
-import { FREE_PLAN_SLUGS } from '../../common/constants/plans';
+import { FREE_PLAN_SLUGS, MASTER_PLAN_SLUG } from '../../common/constants/plans';
 import { FinancialService } from '../../financial/financial.service';
 
 type SessionUser = { id?: string };
@@ -84,6 +84,10 @@ export const ensureUserBillingStatus = async (
 
   if (userPlan?.planSlug && FREE_PLAN_SLUGS.has(userPlan.planSlug)) {
     throw new ForbiddenException('Plano free nao permite check-in');
+  }
+
+  if (userPlan?.planSlug === MASTER_PLAN_SLUG) {
+    return;
   }
 
   const [activeSubscription] = await database

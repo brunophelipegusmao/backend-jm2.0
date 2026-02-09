@@ -1,7 +1,12 @@
 import 'dotenv/config';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
-import { APIError, betterAuth, type BetterAuthPlugin } from 'better-auth';
+import {
+  APIError,
+  betterAuth,
+  type BetterAuthPlugin,
+} from 'better-auth';
+import { getOAuthState } from 'better-auth/api';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { and, eq, isNull } from 'drizzle-orm';
 import * as schema from './drizzle/schema';
@@ -95,6 +100,7 @@ const socialProviders = {
   google: {
     clientId: googleClientId,
     clientSecret: googleClientSecret,
+    disableImplicitSignUp: true,
   },
 };
 
@@ -236,9 +242,41 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
-        before: async (user) => {
+        before: async (user, context) => {
           const payload = user as { planId?: string | null; role?: string };
           const result: Record<string, unknown> = {};
+          const ctxPath = context?.path ?? '';
+          const isSocialFlow =
+            ctxPath === '/sign-in/social' ||
+            ctxPath.startsWith('/callback/') ||
+            ctxPath.startsWith('/oauth2/callback/');
+          if (isSocialFlow) {
+            const oauthState = await getOAuthState().catch(() => null);
+            const requestSignUp = Boolean(
+              oauthState?.requestSignUp ?? context?.body?.requestSignUp,
+            );
+            if (!requestSignUp) {
+              const email =
+                typeof user?.email === 'string'
+                  ? user.email.trim().toLowerCase()
+                  : '';
+              if (!email) {
+                throw new APIError('UNAUTHORIZED', {
+                  message: 'Usuario nao autorizado',
+                });
+              }
+              const [existing] = await db
+                .select({ id: users.id })
+                .from(users)
+                .where(and(eq(users.email, email), isNull(users.deletedAt)))
+                .limit(1);
+              if (!existing) {
+                throw new APIError('UNAUTHORIZED', {
+                  message: 'Usuario nao autorizado',
+                });
+              }
+            }
+          }
           const masterExists = await hasMasterUser();
           const hasPlanId =
             typeof payload.planId === 'string' &&

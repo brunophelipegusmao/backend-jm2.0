@@ -6,10 +6,16 @@ import { BillingGuard } from '../financial/guards/billing.guard';
 import { AuditModule } from '../audit/audit.module';
 import { AnonymousCheckinRateLimiter } from './anonymous-checkin-rate-limiter';
 import { FinancialModule } from '../financial/financial.module';
+import { RolesGuard } from '../common/guards/roles.guard';
 
 @Module({
   imports: [DatabaseModule, AuditModule, FinancialModule],
   controllers: [CheckinController],
-  providers: [CheckinService, BillingGuard, AnonymousCheckinRateLimiter],
+  providers: [
+    CheckinService,
+    BillingGuard,
+    AnonymousCheckinRateLimiter,
+    RolesGuard,
+  ],
 })
 export class CheckinModule {}

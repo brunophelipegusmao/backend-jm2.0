@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Req,
   UseGuards,
@@ -15,6 +16,8 @@ import {
 } from '@thallesp/nestjs-better-auth';
 import type { Request } from 'express';
 import { BillingGuard } from '../financial/guards/billing.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { CheckinService } from './checkin.service';
 import { CreateCheckinDto } from './dto/create-checkin.dto';
 import { CreateIdentifierCheckinDto } from './dto/create-identifier-checkin.dto';
@@ -35,6 +38,17 @@ export class CheckinController {
   @Post('me')
   @UseGuards(BillingGuard)
   createForMe(
+    @Session() session: UserSession,
+    @Body() createCheckinDto: CreateCheckinDto,
+  ) {
+    return this.checkinService.createForUser(
+      this.requireUserId(session),
+      createCheckinDto,
+    );
+  }
+
+  @Post('google')
+  createForGoogle(
     @Session() session: UserSession,
     @Body() createCheckinDto: CreateCheckinDto,
   ) {
@@ -66,5 +80,12 @@ export class CheckinController {
   @Get('me')
   findMyLatest(@Session() session: UserSession) {
     return this.checkinService.findLatestForUser(this.requireUserId(session));
+  }
+
+  @Get('user/:id/history')
+  @UseGuards(RolesGuard)
+  @Roles('MASTER', 'ADMIN', 'STAFF')
+  findUserHistory(@Param('id') id: string) {
+    return this.checkinService.findAll(id);
   }
 }

@@ -184,20 +184,59 @@ export class CheckinService {
     }
   }
 
+  private getDayRange(checkedInAt: Date) {
+    const startOfDay = new Date(
+      checkedInAt.getFullYear(),
+      checkedInAt.getMonth(),
+      checkedInAt.getDate(),
+    );
+    const endOfDay = new Date(
+      checkedInAt.getFullYear(),
+      checkedInAt.getMonth(),
+      checkedInAt.getDate() + 1,
+    );
+    return { startOfDay, endOfDay };
+  }
+
+  private async insertCheckinOncePerDay(userId: string, checkedInAt: Date) {
+    const { startOfDay, endOfDay } = this.getDayRange(checkedInAt);
+    const rows = await this.databaseService.rawQuery(
+      `insert into tb_checkins (user_id, checked_in_at)
+       select $1, $2
+       where not exists (
+         select 1
+         from tb_checkins
+         where user_id = $1
+           and checked_in_at >= $3
+           and checked_in_at < $4
+       )
+       returning id, user_id, checked_in_at, created_at, updated_at`,
+      [userId, checkedInAt, startOfDay, endOfDay],
+    );
+
+    const result = Array.isArray(rows)
+      ? rows
+      : ((rows as any)?.rows ?? []);
+    const row = result[0];
+    if (!row) {
+      throw new BadRequestException('Check-in ja registrado neste dia');
+    }
+    return {
+      id: row.id,
+      userId: row.user_id,
+      checkedInAt: row.checked_in_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
   async createForUser(userId: string, createCheckinDto: CreateCheckinDto) {
     const checkedInAt =
       this.parseCheckedInAt(createCheckinDto.checkedInAt) ?? new Date();
 
     await this.ensureUserCanCheckin(userId);
     await this.ensureNotBlocked(userId, checkedInAt);
-
-    const [checkin] = await this.databaseService.database
-      .insert(checkins)
-      .values({
-        userId,
-        checkedInAt,
-      })
-      .returning();
+    const checkin = await this.insertCheckinOncePerDay(userId, checkedInAt);
 
     return checkin ?? null;
   }
@@ -213,14 +252,7 @@ export class CheckinService {
       await this.ensureUserCanCheckinByIdentifier(createCheckinDto, context);
     await ensureUserBillingStatus(this.databaseService.database, user.id);
     await this.ensureNotBlocked(user.id, checkedInAt);
-
-    const [checkin] = await this.databaseService.database
-      .insert(checkins)
-      .values({
-        userId: user.id,
-        checkedInAt,
-      })
-      .returning();
+    const checkin = await this.insertCheckinOncePerDay(user.id, checkedInAt);
 
     if (checkin) {
       await this.auditService.log({
