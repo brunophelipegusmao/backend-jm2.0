@@ -54,7 +54,7 @@ const DEFAULT_OPERATING_HOURS: DaySchedule[] = [
   { day: 'sunday', segments: [{ start: '08:00', end: '14:00' }] },
 ];
 
-const DEFAULT_MAINTENANCE_ROUTES = ['/contacts', '/checkin'];
+const DEFAULT_MAINTENANCE_ROUTES = ['/checkin'];
 
 const hasMasterRole = (role?: string | string[]) => {
   const roles = normalizeRoles(role);
@@ -192,9 +192,9 @@ export class SystemSettingsService {
     const isMaster = hasMasterRole(actorRole);
     const isAdmin = hasAdminRole(actorRole);
 
-    if (dto.maintenanceMode !== undefined && !isMaster) {
+    if (dto.maintenanceMode === true && !isMaster) {
       throw new ForbiddenException(
-        'Somente MASTER pode alterar o modo manutenção',
+        'Somente MASTER pode ativar o modo manutenção',
       );
     }
 
@@ -246,6 +246,9 @@ export class SystemSettingsService {
     }
 
     if (dto.carouselImages) {
+      for (const image of dto.carouselImages) {
+        this.assertCloudinaryUrl(image.imageUrl);
+      }
       payload.carouselImages = dto.carouselImages.map((image) => ({
         ...image,
         altText: image.altText ?? null,

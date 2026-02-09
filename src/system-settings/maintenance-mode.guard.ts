@@ -14,8 +14,12 @@ type SessionUser = { id?: string };
 type AuthSession = { user?: SessionUser };
 type RequestWithSession = Request & { session?: AuthSession };
 
-const DEFAULT_ALLOWED_ROUTES = ['/contacts', '/checkin'];
+const DEFAULT_ALLOWED_ROUTES = ['/checkin'];
 const AUTH_BYPASS_PREFIXES = ['/api/auth', '/auth'];
+const PUBLIC_SYSTEM_SETTINGS_PATHS = [
+  '/system-settings',
+  '/system-settings/carousel',
+];
 
 const normalizePath = (value?: string | null) => {
   const raw = (value ?? '').trim();
@@ -49,6 +53,12 @@ const isAllowedPath = (path: string, allowedRoutes: string[]) =>
     return path === route || path.startsWith(`${route}/`);
   });
 
+const isPublicSystemSettingsReadPath = (path: string, method: string) =>
+  method === 'GET' &&
+  PUBLIC_SYSTEM_SETTINGS_PATHS.some(
+    (route) => path === route || path.startsWith(`${route}/`),
+  );
+
 @Injectable()
 export class MaintenanceModeGuard implements CanActivate {
   constructor(private readonly databaseService: DatabaseService) {}
@@ -62,6 +72,10 @@ export class MaintenanceModeGuard implements CanActivate {
     }
 
     if (AUTH_BYPASS_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+      return true;
+    }
+
+    if (isPublicSystemSettingsReadPath(path, request.method)) {
       return true;
     }
 
@@ -93,7 +107,7 @@ export class MaintenanceModeGuard implements CanActivate {
         .where(and(eq(users.id, userId), isNull(users.deletedAt)))
         .limit(1);
 
-      if (user?.role === 'MASTER') {
+      if (user?.role === 'MASTER' || user?.role === 'ADMIN') {
         return true;
       }
     }
