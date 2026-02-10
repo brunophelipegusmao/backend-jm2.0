@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+dist
+coverage
+test
+docs
+drizzle
+.env
+.env.*
+Dockerfile*
+npm-debug.log*
+pnpm-debug.log*

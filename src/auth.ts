@@ -83,6 +83,11 @@ const authSchema = {
 };
 
 const frontendUrl = process.env.FRONTEND_URL;
+const frontendOrigins = (frontendUrl ?? '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter((origin) => origin.length > 0);
+const primaryFrontendUrl = frontendOrigins[0];
 const normalizeAuthBaseUrl = (baseUrl: string) => {
   const trimmed = baseUrl.replace(/\/+$/, '');
   if (trimmed.endsWith('/api/auth')) {
@@ -93,9 +98,9 @@ const normalizeAuthBaseUrl = (baseUrl: string) => {
 
 const betterAuthBaseUrl = normalizeAuthBaseUrl(betterAuthUrl);
 const betterAuthOrigin = new URL(betterAuthUrl).origin;
-const trustedOrigins = [betterAuthOrigin, frontendUrl].filter(
-  Boolean,
-) as string[];
+const trustedOrigins = Array.from(
+  new Set([betterAuthOrigin, ...frontendOrigins]),
+);
 const socialProviders = {
   google: {
     clientId: googleClientId,
@@ -135,14 +140,17 @@ const normalizeUrl = (base: string, path: string) => {
 
 const panelUrl =
   process.env.FRONTEND_PANEL_URL ||
-  (frontendUrl
-    ? normalizeUrl(frontendUrl, process.env.FRONTEND_PANEL_PATH ?? 'panel')
+  (primaryFrontendUrl
+    ? normalizeUrl(
+        primaryFrontendUrl,
+        process.env.FRONTEND_PANEL_PATH ?? 'dashboard',
+      )
     : undefined);
 const profileCompletionUrl =
   process.env.FRONTEND_PROFILE_COMPLETION_URL ||
-  (frontendUrl
+  (primaryFrontendUrl
     ? normalizeUrl(
-        frontendUrl,
+        primaryFrontendUrl,
         process.env.FRONTEND_PROFILE_COMPLETION_PATH ?? 'complete-profile',
       )
     : undefined);
