@@ -86,9 +86,7 @@ export class EventsService {
       const rows = await this.databaseService.rawQuery(
         `select 1 from information_schema.columns where table_schema = 'public' and table_name = 'tb_events' and column_name = 'status' limit 1`,
       );
-      this.eventStatusSupported = Array.isArray(rows)
-        ? rows.length > 0
-        : Boolean(rows?.length);
+      this.eventStatusSupported = rows.length > 0;
     } catch {
       this.eventStatusSupported = true;
     }

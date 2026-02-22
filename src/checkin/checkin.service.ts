@@ -26,6 +26,14 @@ type CheckinAuditContext = {
   identifierType?: IdentifierType;
 };
 
+type CheckinInsertRow = {
+  id: string;
+  user_id: string;
+  checked_in_at: Date | string;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+
 @Injectable()
 export class CheckinService {
   constructor(
@@ -200,7 +208,7 @@ export class CheckinService {
 
   private async insertCheckinOncePerDay(userId: string, checkedInAt: Date) {
     const { startOfDay, endOfDay } = this.getDayRange(checkedInAt);
-    const rows = await this.databaseService.rawQuery(
+    const rows = await this.databaseService.rawQuery<CheckinInsertRow>(
       `insert into tb_checkins (user_id, checked_in_at)
        select $1, $2
        where not exists (
@@ -214,8 +222,7 @@ export class CheckinService {
       [userId, checkedInAt, startOfDay, endOfDay],
     );
 
-    const result = Array.isArray(rows) ? rows : (rows?.rows ?? []);
-    const row = result[0];
+    const row = rows[0];
     if (!row) {
       throw new BadRequestException('Check-in ja registrado neste dia');
     }
