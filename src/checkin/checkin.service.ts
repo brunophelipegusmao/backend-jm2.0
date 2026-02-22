@@ -116,7 +116,7 @@ export class CheckinService {
   }
 
   private async ensureUserCanCheckinByIdentifier(
-    { email, cpf }: CreateIdentifierCheckinDto,
+    { email, cpf }: Partial<CreateIdentifierCheckinDto>,
     context?: Pick<CheckinAuditContext, 'ip'>,
   ) {
     const normalizedEmail = this.normalizeEmail(email);
@@ -229,8 +229,9 @@ export class CheckinService {
   }
 
   async createForUser(userId: string, createCheckinDto: CreateCheckinDto) {
+    const payload = createCheckinDto ?? {};
     const checkedInAt =
-      this.parseCheckedInAt(createCheckinDto.checkedInAt) ?? new Date();
+      this.parseCheckedInAt(payload.checkedInAt) ?? new Date();
 
     await this.ensureUserCanCheckin(userId);
     await this.ensureNotBlocked(userId, checkedInAt);
@@ -240,14 +241,15 @@ export class CheckinService {
   }
 
   async createForIdentifier(
-    createCheckinDto: CreateIdentifierCheckinDto,
+    createCheckinDto: CreateIdentifierCheckinDto | undefined,
     context?: Pick<CheckinAuditContext, 'ip' | 'userAgent'>,
   ) {
+    const payload = createCheckinDto ?? {};
     const checkedInAt =
-      this.parseCheckedInAt(createCheckinDto.checkedInAt) ?? new Date();
+      this.parseCheckedInAt(payload.checkedInAt) ?? new Date();
 
     const { user, identifierType } =
-      await this.ensureUserCanCheckinByIdentifier(createCheckinDto, context);
+      await this.ensureUserCanCheckinByIdentifier(payload, context);
     await ensureUserBillingStatus(this.databaseService.database, user.id);
     await this.ensureNotBlocked(user.id, checkedInAt);
     const checkin = await this.insertCheckinOncePerDay(user.id, checkedInAt);
