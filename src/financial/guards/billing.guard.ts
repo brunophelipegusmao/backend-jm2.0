@@ -78,18 +78,26 @@ export const ensureUserBillingStatus = async (
   database: BillingDatabase,
   userId: string,
 ) => {
-  const [userPlan] = await database
-    .select({ planSlug: plans.slug })
+  const [userContext] = await database
+    .select({ role: users.role, planSlug: plans.slug })
     .from(users)
     .leftJoin(plans, eq(users.planId, plans.id))
     .where(and(eq(users.id, userId), isNull(users.deletedAt)))
     .limit(1);
 
-  if (userPlan?.planSlug && FREE_PLAN_SLUGS.has(userPlan.planSlug)) {
+  if (!userContext) {
+    throw new ForbiddenException('Usuario nao encontrado');
+  }
+
+  if (userContext.role === 'MASTER' || userContext.role === 'ADMIN') {
+    return;
+  }
+
+  if (userContext.planSlug && FREE_PLAN_SLUGS.has(userContext.planSlug)) {
     throw new ForbiddenException('Plano free nao permite check-in');
   }
 
-  if (userPlan?.planSlug === MASTER_PLAN_SLUG) {
+  if (userContext.planSlug === MASTER_PLAN_SLUG) {
     return;
   }
 
