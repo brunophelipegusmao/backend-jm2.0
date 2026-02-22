@@ -13,4 +13,3 @@ export const updateMeSchema = z
   });
 
 export type UpdateMeDto = z.infer<typeof updateMeSchema>;
-

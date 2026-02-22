@@ -47,7 +47,7 @@ export class UsersAdminController {
       status:
         status === 'pending' || status === 'approved' || status === 'rejected'
           ? status
-      : 'all',
+          : 'all',
     });
   }
 

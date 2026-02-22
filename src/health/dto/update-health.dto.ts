@@ -22,7 +22,8 @@ const applyMedicationRules = (
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['supplements'],
-      message: 'Suplementos sao obrigatorios quando usesSupplementation for true',
+      message:
+        'Suplementos sao obrigatorios quando usesSupplementation for true',
     });
   }
 };

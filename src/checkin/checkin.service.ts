@@ -214,9 +214,7 @@ export class CheckinService {
       [userId, checkedInAt, startOfDay, endOfDay],
     );
 
-    const result = Array.isArray(rows)
-      ? rows
-      : ((rows as any)?.rows ?? []);
+    const result = Array.isArray(rows) ? rows : (rows?.rows ?? []);
     const row = result[0];
     if (!row) {
       throw new BadRequestException('Check-in ja registrado neste dia');

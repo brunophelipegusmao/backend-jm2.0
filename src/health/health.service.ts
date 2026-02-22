@@ -224,7 +224,8 @@ export class HealthService {
     const normalizedHeight = this.normalizeHeightCm(payload.heightCm);
     return {
       ...payload,
-      heightCm: normalizedHeight === null ? undefined : normalizedHeight.toString(),
+      heightCm:
+        normalizedHeight === null ? undefined : normalizedHeight.toString(),
       weightKg: this.toNumericString(payload.weightKg),
       skinfoldChest: this.toNumericString(payload.skinfoldChest),
       skinfoldAbdomen: this.toNumericString(payload.skinfoldAbdomen),
@@ -309,7 +310,7 @@ export class HealthService {
     const birthDate =
       input.birthDate instanceof Date
         ? input.birthDate.toISOString().slice(0, 10)
-        : input.birthDate ?? null;
+        : (input.birthDate ?? null);
 
     await this.databaseService.database.insert(healthMeasurements).values({
       userId,

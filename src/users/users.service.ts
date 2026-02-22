@@ -1,5 +1,9 @@
 import { randomUUID } from 'crypto';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
@@ -141,8 +145,9 @@ export class UsersService {
     changes: Record<string, { before: unknown; after: unknown }> | null;
   }): PlanRequestSnapshot | null {
     const id =
-      this.normalizeRequiredText(this.getAuditAfterValue(input.changes, 'id')) ??
-      input.entityId;
+      this.normalizeRequiredText(
+        this.getAuditAfterValue(input.changes, 'id'),
+      ) ?? input.entityId;
     const type = this.normalizePlanRequestType(
       this.getAuditAfterValue(input.changes, 'type'),
     );
@@ -769,7 +774,9 @@ export class UsersService {
       }
     }
 
-    const uniqueUserIds = Array.from(new Set([...requestedByIds, ...reviewedByIds]));
+    const uniqueUserIds = Array.from(
+      new Set([...requestedByIds, ...reviewedByIds]),
+    );
     const usersRows =
       uniqueUserIds.length === 0
         ? []
@@ -780,11 +787,14 @@ export class UsersService {
               email: users.email,
             })
             .from(users)
-            .where(and(inArray(users.id, uniqueUserIds), isNull(users.deletedAt)));
+            .where(
+              and(inArray(users.id, uniqueUserIds), isNull(users.deletedAt)),
+            );
 
     const usersById = new Map(usersRows.map((row) => [row.id, row]));
 
-    const filteredStatus = options?.status && options.status !== 'all' ? options.status : null;
+    const filteredStatus =
+      options?.status && options.status !== 'all' ? options.status : null;
 
     return requests
       .filter((request) => !filteredStatus || request.status === filteredStatus)
@@ -827,7 +837,9 @@ export class UsersService {
         id: users.id,
       })
       .from(users)
-      .where(and(eq(users.id, request.requestedByUserId), isNull(users.deletedAt)))
+      .where(
+        and(eq(users.id, request.requestedByUserId), isNull(users.deletedAt)),
+      )
       .limit(1);
 
     if (!requestedUser) {
@@ -849,7 +861,9 @@ export class UsersService {
             active: plans.active,
           })
           .from(plans)
-          .where(and(eq(plans.id, request.targetPlanId), isNull(plans.deletedAt)))
+          .where(
+            and(eq(plans.id, request.targetPlanId), isNull(plans.deletedAt)),
+          )
           .limit(1);
 
         if (!targetPlan || !targetPlan.active) {
@@ -866,7 +880,10 @@ export class UsersService {
             updatedAt: new Date(),
           })
           .where(
-            and(eq(users.id, request.requestedByUserId), isNull(users.deletedAt)),
+            and(
+              eq(users.id, request.requestedByUserId),
+              isNull(users.deletedAt),
+            ),
           );
       } else {
         const updateData: Partial<typeof users.$inferInsert> = {
@@ -882,13 +899,18 @@ export class UsersService {
               active: plans.active,
             })
             .from(plans)
-            .where(and(eq(plans.id, request.targetPlanId), isNull(plans.deletedAt)))
+            .where(
+              and(eq(plans.id, request.targetPlanId), isNull(plans.deletedAt)),
+            )
             .limit(1);
 
           if (!activationPlan || !activationPlan.active) {
             throw new BadRequestException('Plano de ativacao nao encontrado');
           }
-          if (!activationPlan.slug || FREE_PLAN_SLUGS.has(activationPlan.slug)) {
+          if (
+            !activationPlan.slug ||
+            FREE_PLAN_SLUGS.has(activationPlan.slug)
+          ) {
             throw new BadRequestException('Plano de ativacao invalido');
           }
 
@@ -899,7 +921,10 @@ export class UsersService {
           .update(users)
           .set(updateData)
           .where(
-            and(eq(users.id, request.requestedByUserId), isNull(users.deletedAt)),
+            and(
+              eq(users.id, request.requestedByUserId),
+              isNull(users.deletedAt),
+            ),
           );
       }
     }
@@ -937,6 +962,20 @@ export class UsersService {
     payload: UpdateUserAdminDto,
     actor: { actorUserId: string; ip?: string; userAgent?: string },
   ) {
+    const [actorUser] = await this.databaseService.database
+      .select({
+        id: users.id,
+        role: users.role,
+        active: users.active,
+      })
+      .from(users)
+      .where(and(eq(users.id, actor.actorUserId), isNull(users.deletedAt)))
+      .limit(1);
+
+    if (!actorUser || !actorUser.active) {
+      throw new ForbiddenException('Usuario da sessao invalido');
+    }
+
     const [current] = await this.databaseService.database
       .select({
         id: users.id,
@@ -961,6 +1000,22 @@ export class UsersService {
 
     if (!current) {
       throw new BadRequestException('Usuario nao encontrado');
+    }
+
+    const actorIsMaster = actorUser.role === 'MASTER';
+    if (current.role === 'MASTER' && !actorIsMaster) {
+      throw new ForbiddenException(
+        'Somente MASTER pode alterar usuarios MASTER',
+      );
+    }
+    if (
+      payload.role === 'MASTER' &&
+      current.role !== 'MASTER' &&
+      !actorIsMaster
+    ) {
+      throw new ForbiddenException(
+        'Somente MASTER pode atribuir perfil MASTER',
+      );
     }
 
     if (payload.email) {
@@ -996,18 +1051,6 @@ export class UsersService {
 
       if (existingPhone && existingPhone.id !== userId) {
         throw new BadRequestException('Telefone ja cadastrado');
-      }
-    }
-
-    if (payload.role === 'MASTER' && current.role !== 'MASTER') {
-      const [existingMaster] = await this.databaseService.database
-        .select({ id: users.id })
-        .from(users)
-        .where(and(eq(users.role, 'MASTER'), isNull(users.deletedAt)))
-        .limit(1);
-
-      if (existingMaster) {
-        throw new BadRequestException('Ja existe um master cadastrado');
       }
     }
 

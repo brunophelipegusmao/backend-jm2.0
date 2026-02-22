@@ -1,9 +1,6 @@
 import { z } from 'zod';
 
-export const planRequestTypeSchema = z.enum([
-  'plan_change',
-  'plan_activation',
-]);
+export const planRequestTypeSchema = z.enum(['plan_change', 'plan_activation']);
 
 export const createPlanRequestSchema = z
   .object({

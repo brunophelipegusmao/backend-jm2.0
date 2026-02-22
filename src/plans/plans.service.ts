@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { and, desc, eq, isNull, ne, or } from 'drizzle-orm';
 import { DatabaseService } from '../db/database.service';
+import {
+  FREE_PLAN_SLUG,
+  LEGACY_FREE_PLAN_SLUG,
+  MASTER_PLAN_SLUG,
+} from '../common/constants/plans';
 import { plans } from '../drizzle/schema/plans';
 import { users } from '../drizzle/schema/users';
 import { CreatePlanDto } from './dto/create-plan.dto';
@@ -13,6 +18,12 @@ type UniqueCheckInput = {
   slug?: string;
   ignoreId?: string;
 };
+
+const NON_DELETABLE_PLAN_SLUGS = new Set(
+  [FREE_PLAN_SLUG, LEGACY_FREE_PLAN_SLUG, MASTER_PLAN_SLUG].map((slug) =>
+    slug.trim().toLowerCase(),
+  ),
+);
 
 @Injectable()
 export class PlansService {
@@ -251,6 +262,23 @@ export class PlansService {
   }
 
   async remove(id: string) {
+    const [currentPlan] = await this.databaseService.database
+      .select({ id: plans.id, slug: plans.slug })
+      .from(plans)
+      .where(and(eq(plans.id, id), isNull(plans.deletedAt)))
+      .limit(1);
+
+    if (!currentPlan) {
+      return null;
+    }
+
+    const normalizedSlug = currentPlan.slug.trim().toLowerCase();
+    if (NON_DELETABLE_PLAN_SLUGS.has(normalizedSlug)) {
+      throw new BadRequestException(
+        'Planos MASTER e FREE sao protegidos e nao podem ser excluidos',
+      );
+    }
+
     const [activeUser] = await this.databaseService.database
       .select({ id: users.id })
       .from(users)
@@ -270,7 +298,7 @@ export class PlansService {
     const [plan] = await this.databaseService.database
       .update(plans)
       .set({ active: false, deletedAt: new Date() })
-      .where(and(eq(plans.id, id), isNull(plans.deletedAt)))
+      .where(eq(plans.id, currentPlan.id))
       .returning();
 
     return plan ?? null;
