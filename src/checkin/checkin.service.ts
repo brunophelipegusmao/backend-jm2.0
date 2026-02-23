@@ -3,7 +3,7 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { and, desc, eq, gt, isNull, lte, or } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../db/database.service';
 import { checkinBlocks, checkins } from '../drizzle/schema/checkin';
@@ -32,6 +32,18 @@ type CheckinInsertRow = {
   checked_in_at: Date | string;
   created_at: Date | string;
   updated_at: Date | string;
+};
+
+type DashboardCheckinAnalytics = {
+  activeStudents: number;
+  checkins: {
+    day: number;
+    week: number;
+    month: number;
+    year: number;
+    yearRef: number;
+  };
+  generatedAt: string;
 };
 
 @Injectable()
@@ -206,6 +218,17 @@ export class CheckinService {
     return { startOfDay, endOfDay };
   }
 
+  private async countCheckinsBetween(start: Date, end: Date) {
+    const [row] = await this.databaseService.database
+      .select({ total: sql<number>`count(*)::int` })
+      .from(checkins)
+      .where(
+        and(gte(checkins.checkedInAt, start), lt(checkins.checkedInAt, end)),
+      );
+
+    return Number(row?.total ?? 0);
+  }
+
   private async insertCheckinOncePerDay(userId: string, checkedInAt: Date) {
     const { startOfDay, endOfDay } = this.getDayRange(checkedInAt);
     const rows = await this.databaseService.rawQuery<CheckinInsertRow>(
@@ -336,5 +359,72 @@ export class CheckinService {
       .limit(1);
 
     return checkin ?? null;
+  }
+
+  async getDashboardAnalytics(
+    yearInput?: string,
+  ): Promise<DashboardCheckinAnalytics> {
+    const now = new Date();
+    const parsedYear = Number(yearInput);
+    const yearRef =
+      Number.isInteger(parsedYear) && parsedYear >= 2000 && parsedYear <= 9999
+        ? parsedYear
+        : now.getFullYear();
+
+    const startOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
+    const startOfNextDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1,
+    );
+
+    const startOfWeek = new Date(startOfDay);
+    const dayOfWeek = startOfWeek.getDay();
+    const diffToMonday = (dayOfWeek + 6) % 7;
+    startOfWeek.setDate(startOfWeek.getDate() - diffToMonday);
+    const startOfNextWeek = new Date(startOfWeek);
+    startOfNextWeek.setDate(startOfWeek.getDate() + 7);
+
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const startOfYear = new Date(yearRef, 0, 1);
+    const startOfNextYear = new Date(yearRef + 1, 0, 1);
+
+    const [activeStudentsRow, dayCheckins, weekCheckins, monthCheckins, yearCheckins] =
+      await Promise.all([
+        this.databaseService.database
+          .select({ total: sql<number>`count(*)::int` })
+          .from(users)
+          .where(
+            and(
+              eq(users.role, 'STUDENT'),
+              eq(users.active, true),
+              isNull(users.deletedAt),
+            ),
+          )
+          .limit(1)
+          .then((rows) => rows[0]),
+        this.countCheckinsBetween(startOfDay, startOfNextDay),
+        this.countCheckinsBetween(startOfWeek, startOfNextWeek),
+        this.countCheckinsBetween(startOfMonth, startOfNextMonth),
+        this.countCheckinsBetween(startOfYear, startOfNextYear),
+      ]);
+
+    return {
+      activeStudents: Number(activeStudentsRow?.total ?? 0),
+      checkins: {
+        day: dayCheckins,
+        week: weekCheckins,
+        month: monthCheckins,
+        year: yearCheckins,
+        yearRef,
+      },
+      generatedAt: now.toISOString(),
+    };
   }
 }

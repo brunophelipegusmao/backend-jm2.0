@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -87,5 +88,12 @@ export class CheckinController {
   @Roles('MASTER', 'ADMIN', 'STAFF')
   findUserHistory(@Param('id') id: string) {
     return this.checkinService.findAll(id);
+  }
+
+  @Get('analytics/dashboard')
+  @UseGuards(RolesGuard)
+  @Roles('MASTER', 'ADMIN', 'COACH')
+  getDashboardAnalytics(@Query('year') year?: string) {
+    return this.checkinService.getDashboardAnalytics(year);
   }
 }
