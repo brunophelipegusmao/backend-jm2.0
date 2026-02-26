@@ -9,13 +9,19 @@ import { DatabaseService } from '../db/database.service';
 import { checkinBlocks, checkins } from '../drizzle/schema/checkin';
 import { users } from '../drizzle/schema/users';
 import { ensureUserBillingStatus } from '../financial/guards/billing.guard';
+import {
+  CPF_DIGITS_REGEX,
+  CPF_FORMAT_ERROR_MESSAGE,
+  CPF_INVALID_ERROR_MESSAGE,
+  isValidCpf,
+  normalizeCpf,
+} from '../common/utils/cpf';
 import { AnonymousCheckinRateLimiter } from './anonymous-checkin-rate-limiter';
 import { CreateCheckinDto } from './dto/create-checkin.dto';
 import { CreateIdentifierCheckinDto } from './dto/create-identifier-checkin.dto';
 import { UpdateCheckinDto } from './dto/update-checkin.dto';
 
 const CHECKIN_ROLES = new Set(['STAFF', 'COACH', 'STUDENT', 'MASTER', 'ADMIN']);
-const CPF_REGEX = /^\d{11}$/;
 const CHECKIN_ANON_ACTION = 'anonymous_create';
 
 type IdentifierType = 'email' | 'cpf' | 'email_cpf';
@@ -98,9 +104,12 @@ export class CheckinService {
     if (!trimmed) {
       return undefined;
     }
-    const digits = trimmed.replace(/\D/g, '');
-    if (!CPF_REGEX.test(digits)) {
-      throw new BadRequestException('CPF deve conter 11 digitos numericos');
+    const digits = normalizeCpf(trimmed);
+    if (!CPF_DIGITS_REGEX.test(digits)) {
+      throw new BadRequestException(CPF_FORMAT_ERROR_MESSAGE);
+    }
+    if (!isValidCpf(digits)) {
+      throw new BadRequestException(CPF_INVALID_ERROR_MESSAGE);
     }
     return digits;
   }
@@ -395,25 +404,30 @@ export class CheckinService {
     const startOfYear = new Date(yearRef, 0, 1);
     const startOfNextYear = new Date(yearRef + 1, 0, 1);
 
-    const [activeStudentsRow, dayCheckins, weekCheckins, monthCheckins, yearCheckins] =
-      await Promise.all([
-        this.databaseService.database
-          .select({ total: sql<number>`count(*)::int` })
-          .from(users)
-          .where(
-            and(
-              eq(users.role, 'STUDENT'),
-              eq(users.active, true),
-              isNull(users.deletedAt),
-            ),
-          )
-          .limit(1)
-          .then((rows) => rows[0]),
-        this.countCheckinsBetween(startOfDay, startOfNextDay),
-        this.countCheckinsBetween(startOfWeek, startOfNextWeek),
-        this.countCheckinsBetween(startOfMonth, startOfNextMonth),
-        this.countCheckinsBetween(startOfYear, startOfNextYear),
-      ]);
+    const [
+      activeStudentsRow,
+      dayCheckins,
+      weekCheckins,
+      monthCheckins,
+      yearCheckins,
+    ] = await Promise.all([
+      this.databaseService.database
+        .select({ total: sql<number>`count(*)::int` })
+        .from(users)
+        .where(
+          and(
+            eq(users.role, 'STUDENT'),
+            eq(users.active, true),
+            isNull(users.deletedAt),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0]),
+      this.countCheckinsBetween(startOfDay, startOfNextDay),
+      this.countCheckinsBetween(startOfWeek, startOfNextWeek),
+      this.countCheckinsBetween(startOfMonth, startOfNextMonth),
+      this.countCheckinsBetween(startOfYear, startOfNextYear),
+    ]);
 
     return {
       activeStudents: Number(activeStudentsRow?.total ?? 0),

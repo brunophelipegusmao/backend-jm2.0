@@ -1,10 +1,8 @@
 import { z } from 'zod';
+import { cpfSchema } from '../../common/validators/cpf.schema';
 
 export const completeProfileSchema = z.object({
-  cpf: z
-    .string()
-    .trim()
-    .regex(/^\d{11}$/, 'CPF deve conter 11 digitos numericos'),
+  cpf: cpfSchema,
   name: z.string().trim().min(2).max(120).optional(),
   phone: z.string().trim().min(8).max(20),
   address: z.string().trim().min(4).max(255).optional(),
