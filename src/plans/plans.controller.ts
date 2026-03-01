@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { AllowAnonymous, AuthGuard } from '@thallesp/nestjs-better-auth';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { PlansService } from './plans.service';
 import { CreatePlanDto, createPlanSchema } from './dto/create-plan.dto';
 import { UpdatePlanDto, updatePlanSchema } from './dto/update-plan.dto';
@@ -21,6 +23,8 @@ export class PlansController {
   constructor(private readonly plansService: PlansService) {}
 
   @Post()
+  @UseGuards(RolesGuard)
+  @Roles('MASTER', 'ADMIN', 'STAFF')
   create(
     @Body(new ZodValidationPipe(createPlanSchema))
     createPlanDto: CreatePlanDto,
